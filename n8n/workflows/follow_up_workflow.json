@@ -1,0 +1,138 @@
+{
+  "name": "Voice AI — Post-Call Follow-Up",
+  "nodes": [
+    {
+      "id": "webhook-trigger",
+      "name": "Call Completed Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 300],
+      "parameters": {
+        "path": "call-completed",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "responseCode": 200
+      }
+    },
+    {
+      "id": "route-by-outcome",
+      "name": "Route by Outcome",
+      "type": "n8n-nodes-base.switch",
+      "position": [460, 300],
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.outcome }}",
+        "rules": {
+          "rules": [
+            { "value2": "booked",             "output": 0 },
+            { "value2": "callback_requested", "output": 1 },
+            { "value2": "not_interested",     "output": 2 },
+            { "value2": "completed",          "output": 3 }
+          ]
+        },
+        "fallbackOutput": 3
+      }
+    },
+    {
+      "id": "send-booking-confirmation",
+      "name": "Send Booking Confirmation Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [700, 160],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.brevo.com/v3/smtp/email",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headers": {
+          "parameters": [
+            { "name": "api-key", "value": "={{ $env.BREVO_API_KEY }}" }
+          ]
+        },
+        "bodyContentType": "json",
+        "body": {
+          "sender": { "name": "AI Receptionist", "email": "{{ $env.EMAIL_FROM_ADDRESS }}" },
+          "to": [{ "email": "={{ $json.lead_email }}", "name": "={{ $json.caller_number }}" }],
+          "subject": "Your demo call is confirmed",
+          "htmlContent": "<h2>Your call is booked!</h2><p>We look forward to speaking with you. Check your calendar for the invite.</p><p>Booking reference: {{ $json.booking_id }}</p>"
+        }
+      }
+    },
+    {
+      "id": "create-follow-up-task",
+      "name": "Log Follow-Up Task to DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [700, 300],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.BACKEND_URL }}/leads/{{ $json.lead_id }}",
+        "bodyContentType": "json",
+        "body": {
+          "status": "contacted",
+          "notes": "Callback requested during inbound call. Summary: {{ $json.transcript_summary }}"
+        }
+      }
+    },
+    {
+      "id": "suppress-not-interested",
+      "name": "Mark Lead Not Interested",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [700, 440],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.BACKEND_URL }}/leads/{{ $json.lead_id }}",
+        "bodyContentType": "json",
+        "body": {
+          "status": "lost",
+          "notes": "Caller indicated not interested during inbound AI call."
+        }
+      }
+    },
+    {
+      "id": "log-completed-call",
+      "name": "Log Completed Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [700, 580],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.BACKEND_URL }}/leads/{{ $json.lead_id }}",
+        "bodyContentType": "json",
+        "body": {
+          "status": "contacted",
+          "notes": "Inbound call completed. Summary: {{ $json.transcript_summary }}"
+        }
+      }
+    },
+    {
+      "id": "send-internal-slack-alert",
+      "name": "Notify Team (Webhook / Slack)",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [940, 160],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "bodyContentType": "json",
+        "body": {
+          "text": ":phone: *New Demo Booked!*\nCaller: `{{ $json.caller_number }}`\nBooking: `{{ $json.booking_id }}`\nSummary: {{ $json.transcript_summary }}"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Call Completed Webhook": {
+      "main": [[{ "node": "Route by Outcome", "type": "main", "index": 0 }]]
+    },
+    "Route by Outcome": {
+      "main": [
+        [{ "node": "Send Booking Confirmation Email", "type": "main", "index": 0 }],
+        [{ "node": "Log Follow-Up Task to DB",        "type": "main", "index": 0 }],
+        [{ "node": "Mark Lead Not Interested",         "type": "main", "index": 0 }],
+        [{ "node": "Log Completed Call",               "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Booking Confirmation Email": {
+      "main": [[{ "node": "Notify Team (Webhook / Slack)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
