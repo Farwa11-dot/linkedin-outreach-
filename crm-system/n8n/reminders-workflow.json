@@ -1,0 +1,127 @@
+{
+  "name": "Outreach CRM — Daily Follow-Up Reminder",
+  "description": "Runs every weekday morning. Reads Google Sheets for leads due for follow-up today and sends you a summary digest — does NOT send emails on your behalf.",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "trigger-daily-reminder",
+      "name": "Schedule: 8am Mon–Fri",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [100, 300],
+      "notes": "Fires at 8am every weekday. Adjust timezone in n8n settings."
+    },
+    {
+      "parameters": {
+        "documentId": "REPLACE_WITH_YOUR_SPREADSHEET_ID",
+        "sheetName": "Leads",
+        "operation": "read"
+      },
+      "id": "read-leads",
+      "name": "Read All Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [300, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets — CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// ─── DAILY FOLLOW-UP DIGEST BUILDER ──────────────────────────────────────\n//\n// Finds leads where Next Follow-Up Date = today (or overdue)\n// and no reply has been received.\n// Builds a plain-text digest to email to yourself.\n//\n// This workflow does NOT send outreach emails.\n// It tells YOU who to follow up with today.\n\nconst items = $input.all();\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\nconst todayStr = today.toISOString().split('T')[0];\n\n// ── Closed statuses — skip these completely ──────────────────────────────\nconst closedStatuses = [\n  'Booked',\n  'Not Interested',\n  'Lost',\n  'Park - 90 Days'\n];\n\n// ── Categorize leads ─────────────────────────────────────────────────────\nconst dueToday = [];    // Follow-up date = today\nconst overdue = [];     // Follow-up date < today (missed days)\nconst newReplies = [];  // Reply received but not yet in Replied/Interested/Booked status\n\nfor (const item of items) {\n  const lead = item.json;\n\n  // Skip empty rows\n  if (!lead['Business Name'] || !lead['Email']) continue;\n\n  const status = lead['Status'] || 'New Lead';\n  const replyReceived = lead['Reply Received'] === 'TRUE' || lead['Reply Received'] === true;\n  const nextFollowUpStr = lead['Next Follow-Up Date'];\n\n  // Skip closed statuses\n  if (closedStatuses.includes(status)) continue;\n\n  // Flag leads that replied but status hasn't been updated yet\n  if (replyReceived && !['Replied', 'Interested', 'Booked', 'Not Interested', 'Lost'].includes(status)) {\n    newReplies.push(lead);\n    continue;\n  }\n\n  // Skip if already replied (no follow-up needed)\n  if (replyReceived) continue;\n\n  // Check if follow-up is due\n  if (!nextFollowUpStr) continue;\n\n  const nextFollowUpDate = new Date(nextFollowUpStr);\n  nextFollowUpDate.setHours(0, 0, 0, 0);\n\n  const diffDays = Math.floor((today - nextFollowUpDate) / (1000 * 60 * 60 * 24));\n\n  if (diffDays === 0) {\n    dueToday.push({ ...lead, _daysOverdue: 0 });\n  } else if (diffDays > 0) {\n    overdue.push({ ...lead, _daysOverdue: diffDays });\n  }\n}\n\n// ── Sort overdue by how late they are ────────────────────────────────────\noverdue.sort((a, b) => b._daysOverdue - a._daysOverdue);\n\n// ── Build the digest email ───────────────────────────────────────────────\nconst dateDisplay = today.toLocaleDateString('en-US', {\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'\n});\n\nlet digest = `OUTREACH FOLLOW-UP DIGEST — ${dateDisplay}\\n`;\ndigest += `${'='.repeat(60)}\\n\\n`;\n\nif (newReplies.length > 0) {\n  digest += `⚡ REPLIES RECEIVED (respond today):\\n`;\n  digest += `-`.repeat(40) + `\\n`;\n  for (const lead of newReplies) {\n    digest += `• ${lead['Business Name']} (${lead['First Name'] || lead['Contact Name']})\\n`;\n    digest += `  Email: ${lead['Email']}\\n`;\n    digest += `  Reply summary: ${lead['Reply Summary'] || '(not yet logged)'}\\n`;\n    digest += `  Status: ${lead['Status']}\\n\\n`;\n  }\n}\n\nif (dueToday.length > 0) {\n  digest += `📬 FOLLOW-UPS DUE TODAY (${dueToday.length}):\\n`;\n  digest += `-`.repeat(40) + `\\n`;\n  for (const lead of dueToday) {\n    const step = lead['Status'];\n    const lastContact = lead['Last Contact Date'] || lead['Initial Email Date'] || 'unknown';\n    digest += `• ${lead['Business Name']} (${lead['First Name'] || lead['Contact Name']}) — ${lead['Industry']}\\n`;\n    digest += `  Email: ${lead['Email']}\\n`;\n    digest += `  Stage: ${step}\\n`;\n    digest += `  Last contact: ${lastContact}\\n`;\n    digest += `  Personalization: ${lead['Personalization Note'] || '(none logged)'}\\n\\n`;\n  }\n} else {\n  digest += `📬 FOLLOW-UPS DUE TODAY: None\\n\\n`;\n}\n\nif (overdue.length > 0) {\n  digest += `⚠ OVERDUE FOLLOW-UPS (${overdue.length}) — action needed:\\n`;\n  digest += `-`.repeat(40) + `\\n`;\n  for (const lead of overdue) {\n    digest += `• ${lead['Business Name']} — ${lead['_daysOverdue']} day(s) overdue\\n`;\n    digest += `  Stage: ${lead['Status']} | Email: ${lead['Email']}\\n\\n`;\n  }\n}\n\n// ── Summary line ─────────────────────────────────────────────────────────\nconst totalActions = newReplies.length + dueToday.length + overdue.length;\ndigest += `${'='.repeat(60)}\\n`;\ndigest += `TOTAL ACTIONS TODAY: ${totalActions}\\n`;\ndigest += `  Replies to handle: ${newReplies.length}\\n`;\ndigest += `  Follow-ups to send: ${dueToday.length}\\n`;\ndigest += `  Overdue (catch up): ${overdue.length}\\n`;\ndigest += `\\nOpen Google Sheets to begin: [your spreadsheet URL here]\\n`;\n\nreturn [{\n  json: {\n    digest,\n    totalActions,\n    dueToday: dueToday.length,\n    overdue: overdue.length,\n    newReplies: newReplies.length,\n    hasItems: totalActions > 0\n  }\n}];"
+      },
+      "id": "build-digest",
+      "name": "Build Daily Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json['totalActions'] }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "check-if-anything-due",
+      "name": "Anything Due Today?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [740, 300],
+      "notes": "Only sends the email if there is at least one action due. No email = no noise."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "toList": "REPLACE_WITH_YOUR_PERSONAL_EMAIL",
+        "subject": "={{ $json['newReplies'] > 0 ? '⚡ ' + $json['newReplies'] + ' reply — ' : '' }}{{ $json['dueToday'] + $json['overdue'] }} follow-up{{ ($json['dueToday'] + $json['overdue']) !== 1 ? 's' : '' }} due today",
+        "message": "={{ $json['digest'] }}"
+      },
+      "id": "send-digest-email",
+      "name": "Email Digest to Yourself",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [960, 180],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail — Your Account"
+        }
+      },
+      "notes": "Sends to your own inbox — not to leads. This is a reminder tool only."
+    },
+    {
+      "parameters": {},
+      "id": "nothing-due-end",
+      "name": "No Actions Today — Skip",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [960, 420],
+      "notes": "If nothing is due, the workflow ends silently. No email, no noise."
+    }
+  ],
+  "connections": {
+    "Schedule: 8am Mon–Fri": {
+      "main": [[{"node": "Read All Leads", "type": "main", "index": 0}]]
+    },
+    "Read All Leads": {
+      "main": [[{"node": "Build Daily Digest", "type": "main", "index": 0}]]
+    },
+    "Build Daily Digest": {
+      "main": [[{"node": "Anything Due Today?", "type": "main", "index": 0}]]
+    },
+    "Anything Due Today?": {
+      "main": [
+        [{"node": "Email Digest to Yourself", "type": "main", "index": 0}],
+        [{"node": "No Actions Today — Skip", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "tags": ["crm", "reminders", "solo-founder", "no-bulk-send"],
+  "versionId": "1.0.0",
+  "meta": {
+    "note": "This workflow is a reminder tool only. It reads your CRM and emails YOU a digest. It does not send any outreach emails to leads. All outreach is done manually by you."
+  }
+}
