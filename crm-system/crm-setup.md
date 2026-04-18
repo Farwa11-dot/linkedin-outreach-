@@ -22,37 +22,89 @@ This is your master pipeline. Every lead lives here permanently — even dead on
 
 ### Full Column List
 
+**Block 1 — Identity (A–K)**
+
 | Col | Field | Type | Notes |
 |---|---|---|---|
 | A | `Lead ID` | Text | Format: `L001`, `L002` — enter manually, never changes |
 | B | `Business Name` | Text | Exact name from Google Maps / their website |
 | C | `Industry` | Dropdown | `Dental` / `Aesthetic` / `Med Spa` / `Ortho` |
-| D | `Contact Name` | Text | Owner, practice manager, or doctor — whoever you're emailing |
+| D | `Contact Name` | Text | Owner, practice manager, or doctor |
 | E | `First Name` | Text | Used in email salutation |
 | F | `Email` | Text | Primary outreach email |
-| G | `Phone` | Text | Optional — useful if they call back |
-| H | `Website` | URL | Their website — check it before you email |
+| G | `Phone` | Text | Useful if they call back or for HOT lead call attempt |
+| H | `Website` | URL | Their website — check before every email |
 | I | `City` | Text | City they operate in |
 | J | `State` | Text | 2-letter state code |
 | K | `Contact Source` | Dropdown | `Google Maps` / `Website` / `Referral` / `LinkedIn` |
-| L | `Personalization Note` | Text | One real observation about their business (see below) |
-| M | `Status` | Dropdown | Pipeline stage — see values below |
-| N | `Initial Email Date` | Date | When Step 1 was sent |
-| O | `Follow-Up 1 Date` | Date | When Step 2 was sent (Day 2) |
-| P | `Follow-Up 2 Date` | Date | When Step 3 was sent (Day 5) |
-| Q | `Follow-Up 3 Date` | Date | When Step 4 was sent (Day 10) |
-| R | `Last Contact Date` | Date | Most recent outreach of any kind |
-| S | `Next Follow-Up Date` | Date | When to contact next — this drives your daily queue |
-| T | `Reply Received` | Checkbox | Check when any reply comes in |
-| U | `Reply Date` | Date | When they replied |
-| V | `Reply Summary` | Text | One sentence: what they said |
-| W | `Meeting Date` | Date | If booked — when is the call/meeting |
-| X | `Outcome` | Dropdown | `In Progress` / `Booked` / `Not Interested` / `Park 90 Days` |
-| Y | `Notes` | Text | Anything else — call notes, things they mentioned, context |
+
+**Block 2 — Research & Scoring (L–S)**
+
+| Col | Field | Type | Notes |
+|---|---|---|---|
+| L | `Personalization Note` | Text | One specific, true observation — required before emailing |
+| M | `Score: Ads` | Number | 0–2 — are they running Google or Facebook ads? |
+| N | `Score: Service` | Number | 0–2 — how high-ticket is their service mix? |
+| O | `Score: Urgency` | Number | 0–3 — count of urgency signals observed |
+| P | `Score: Website` | Number | 0–2 — website quality and booking gap |
+| Q | `Score: Contact` | Number | 0–1 — owner email vs generic inbox |
+| R | `Lead Score` | Formula | `=IFERROR(SUM(M2:Q2),"")` — auto-calculates |
+| S | `Priority Tier` | Formula | See formula below — auto-labels HOT/WARM/COOL/COLD |
+
+**Block 3 — Pipeline Status (T–Z)**
+
+| Col | Field | Type | Notes |
+|---|---|---|---|
+| T | `Status` | Dropdown | Full pipeline stage — see values below |
+| U | `Initial Email Date` | Date | When Step 1 was sent |
+| V | `Follow-Up 1 Date` | Date | When Step 2 was sent |
+| W | `Follow-Up 2 Date` | Date | When Step 3 was sent |
+| X | `Follow-Up 3 Date` | Date | When breakup email was sent |
+| Y | `Last Contact Date` | Date | Most recent outreach of any kind |
+| Z | `Next Follow-Up Date` | Date | Drives the Follow-Up Queue tab — this is your to-do list |
+
+**Block 4 — Reply Tracking (AA–AE)**
+
+| Col | Field | Type | Notes |
+|---|---|---|---|
+| AA | `Reply Received` | Checkbox | Check the moment any reply arrives |
+| AB | `Reply Date` | Date | When they replied |
+| AC | `Reply Type` | Dropdown | `Positive` / `Not Now` / `Not Interested` / `Info Request` / `Auto-Reply` / `Unsubscribe` |
+| AD | `Reply Summary` | Text | One sentence — what did they say? |
+| AE | `Meeting Date` | Date | Confirmed call or demo date |
+
+**Block 5 — Outcome & Notes (AF–AG)**
+
+| Col | Field | Type | Notes |
+|---|---|---|---|
+| AF | `Outcome` | Dropdown | `In Progress` / `Booked` / `Not Interested` / `Park 90 Days` / `Do Not Contact` |
+| AG | `Notes` | Text | Call notes, objections raised, context — free form |
+
+---
+
+### Formulas for Auto-Calculated Columns
+
+**Lead Score (column R):**
+```
+=IFERROR(SUM(M2:Q2),"")
+```
+
+**Priority Tier (column S):**
+```
+=IF(R2="","",
+  IF(R2>=8,   "🔴 HOT",
+  IF(R2>=5.5, "🟠 WARM",
+  IF(R2>=3,   "🟡 COOL",
+              "⚪ COLD"))))
+```
+
+Copy these formulas down for every row that has a Lead ID.
+
+---
 
 ### Status Dropdown Values
 
-Set these as data validation on column M:
+Set data validation on column T. Full pipeline:
 
 ```
 New Lead
@@ -61,25 +113,31 @@ Follow-Up 1 Sent
 Follow-Up 2 Sent
 Follow-Up 3 Sent
 Replied
-Interested
+Call Scheduled
+Qualified
+Demo Held
+Closing
 Booked
 Not Interested
 Lost
 Park - 90 Days
+Park - 60 Days
+Do Not Contact
 ```
 
 ### Setting Up Data Validation
 
-1. Click column M header to select all of column M
+1. Click the column header to select the whole column
 2. **Data** menu → **Data Validation** → **Add Rule**
-3. Criteria: **Dropdown** → type each status value, one per line
+3. Criteria: **Dropdown** → type each value, one per line
 4. Click **Done**
 
-Repeat for columns C (Industry), K (Contact Source), X (Outcome).
+Apply dropdowns to: `C` (Industry), `K` (Contact Source), `T` (Status),
+`AC` (Reply Type), `AF` (Outcome).
 
-### Conditional Formatting — Color Code Your Pipeline
+### Conditional Formatting — Status Column (Column T)
 
-Select column M → **Format** → **Conditional Formatting**:
+Select column T → **Format** → **Conditional Formatting**:
 
 | Status | Background Color |
 |---|---|
@@ -87,11 +145,26 @@ Select column M → **Format** → **Conditional Formatting**:
 | Contacted | Light blue (#cfe2ff) |
 | Follow-Up 1/2/3 Sent | Yellow (#fff2cc) |
 | Replied | Light green (#d9ead3) |
-| Interested | Green (#b6d7a8) |
-| Booked | Dark green (#93c47d) |
+| Call Scheduled | Teal (#a2c4c9) |
+| Qualified | Green (#b6d7a8) |
+| Demo Held | Dark green (#6aa84f), white text |
+| Closing | Orange (#f9cb9c) |
+| Booked | Dark green (#274e13), white text |
 | Not Interested | Light red (#f4cccc) |
 | Lost | Gray (#efefef) |
 | Park - 90 Days | Purple (#d9d2e9) |
+| Do Not Contact | Dark red (#cc0000), white text |
+
+### Conditional Formatting — Priority Tier Column (Column S)
+
+Select column S → **Format** → **Conditional Formatting**:
+
+| Text Contains | Background | Text |
+|---|---|---|
+| `🔴 HOT` | Red (#ea4335) | White, Bold |
+| `🟠 WARM` | Orange (#ff9900) | Black |
+| `🟡 COOL` | Yellow (#fbbc04) | Black |
+| `⚪ COLD` | Light gray (#f3f3f3) | Gray |
 
 ### The Personalization Note Column (Column L)
 
@@ -121,33 +194,43 @@ Rule: if you cannot fill in column L with something specific and true, do more r
 
 ## Tab 2: `Follow-Up Queue`
 
-A filtered view that shows only leads where `Next Follow-Up Date` = today or earlier, and the lead hasn't replied yet.
+A filtered view showing leads due for contact today, sorted by priority tier.
+HOT leads always appear at the top. This is your morning to-do list.
 
 ### Setup
 
 1. Click on the `Follow-Up Queue` tab
-2. In cell A1, enter this header: `Today's Follow-Ups`
-3. In cell A3, paste this formula:
+2. In cell A1, enter this header: `Today's Priority Queue`
+3. In cell B1: `=COUNTA(A4:A10000) & " actions due today"`
+4. In cell A3, paste this formula:
 
 ```
-=FILTER(
-  Leads!A:Y,
-  (Leads!S:S <= TODAY()) *
-  (Leads!S:S <> "") *
-  (Leads!T:T = FALSE) *
-  (Leads!M:M <> "Booked") *
-  (Leads!M:M <> "Not Interested") *
-  (Leads!M:M <> "Lost") *
-  (Leads!M:M <> "Park - 90 Days")
+=SORT(
+  FILTER(
+    Leads!A:AG,
+    (Leads!Z:Z <= TODAY()) *
+    (Leads!Z:Z <> "") *
+    (Leads!AA:AA = FALSE) *
+    (Leads!T:T <> "Booked") *
+    (Leads!T:T <> "Not Interested") *
+    (Leads!T:T <> "Lost") *
+    (Leads!T:T <> "Park - 90 Days") *
+    (Leads!T:T <> "Park - 60 Days") *
+    (Leads!T:T <> "Do Not Contact")
+  ),
+  18, TRUE
 )
 ```
 
-This pulls every lead where:
-- Next Follow-Up Date is today or overdue
-- No reply has been received (checkbox unchecked)
-- Status is not a closed/done state
+Column 18 is the Lead Score column (R) — this sorts highest score to the top
+so HOT leads always surface first.
 
-Every morning, open this tab first. It is your to-do list.
+This pulls every lead where:
+- `Next Follow-Up Date` (col Z) is today or overdue
+- No reply received (col AA checkbox unchecked)
+- Status is not a terminal/closed state
+
+Every morning, open this tab first. Work top to bottom.
 
 ### Add a Count Summary in B1
 

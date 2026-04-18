@@ -1,6 +1,6 @@
 {
-  "name": "Outreach CRM — Daily Follow-Up Reminder",
-  "description": "Runs every weekday morning. Reads Google Sheets for leads due for follow-up today and sends you a summary digest — does NOT send emails on your behalf.",
+  "name": "Outreach CRM — Priority Daily Digest",
+  "description": "Runs every weekday at 8am. Reads Google Sheets, segments leads by priority tier (HOT/WARM/COOL), and emails you a ranked digest of who to contact today. Does NOT send outreach emails.",
   "nodes": [
     {
       "parameters": {
@@ -13,24 +13,27 @@
           ]
         }
       },
-      "id": "trigger-daily-reminder",
+      "id": "trigger-daily",
       "name": "Schedule: 8am Mon–Fri",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
-      "position": [100, 300],
-      "notes": "Fires at 8am every weekday. Adjust timezone in n8n settings."
+      "position": [100, 400]
     },
     {
       "parameters": {
         "documentId": "REPLACE_WITH_YOUR_SPREADSHEET_ID",
         "sheetName": "Leads",
-        "operation": "read"
+        "operation": "read",
+        "options": {
+          "headerRow": 1,
+          "valueRenderMode": "FORMATTED_VALUE"
+        }
       },
       "id": "read-leads",
       "name": "Read All Leads",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [300, 300],
+      "position": [300, 400],
       "credentials": {
         "googleSheetsOAuth2Api": {
           "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
@@ -40,13 +43,13 @@
     },
     {
       "parameters": {
-        "functionCode": "// ─── DAILY FOLLOW-UP DIGEST BUILDER ──────────────────────────────────────\n//\n// Finds leads where Next Follow-Up Date = today (or overdue)\n// and no reply has been received.\n// Builds a plain-text digest to email to yourself.\n//\n// This workflow does NOT send outreach emails.\n// It tells YOU who to follow up with today.\n\nconst items = $input.all();\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\nconst todayStr = today.toISOString().split('T')[0];\n\n// ── Closed statuses — skip these completely ──────────────────────────────\nconst closedStatuses = [\n  'Booked',\n  'Not Interested',\n  'Lost',\n  'Park - 90 Days'\n];\n\n// ── Categorize leads ─────────────────────────────────────────────────────\nconst dueToday = [];    // Follow-up date = today\nconst overdue = [];     // Follow-up date < today (missed days)\nconst newReplies = [];  // Reply received but not yet in Replied/Interested/Booked status\n\nfor (const item of items) {\n  const lead = item.json;\n\n  // Skip empty rows\n  if (!lead['Business Name'] || !lead['Email']) continue;\n\n  const status = lead['Status'] || 'New Lead';\n  const replyReceived = lead['Reply Received'] === 'TRUE' || lead['Reply Received'] === true;\n  const nextFollowUpStr = lead['Next Follow-Up Date'];\n\n  // Skip closed statuses\n  if (closedStatuses.includes(status)) continue;\n\n  // Flag leads that replied but status hasn't been updated yet\n  if (replyReceived && !['Replied', 'Interested', 'Booked', 'Not Interested', 'Lost'].includes(status)) {\n    newReplies.push(lead);\n    continue;\n  }\n\n  // Skip if already replied (no follow-up needed)\n  if (replyReceived) continue;\n\n  // Check if follow-up is due\n  if (!nextFollowUpStr) continue;\n\n  const nextFollowUpDate = new Date(nextFollowUpStr);\n  nextFollowUpDate.setHours(0, 0, 0, 0);\n\n  const diffDays = Math.floor((today - nextFollowUpDate) / (1000 * 60 * 60 * 24));\n\n  if (diffDays === 0) {\n    dueToday.push({ ...lead, _daysOverdue: 0 });\n  } else if (diffDays > 0) {\n    overdue.push({ ...lead, _daysOverdue: diffDays });\n  }\n}\n\n// ── Sort overdue by how late they are ────────────────────────────────────\noverdue.sort((a, b) => b._daysOverdue - a._daysOverdue);\n\n// ── Build the digest email ───────────────────────────────────────────────\nconst dateDisplay = today.toLocaleDateString('en-US', {\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'\n});\n\nlet digest = `OUTREACH FOLLOW-UP DIGEST — ${dateDisplay}\\n`;\ndigest += `${'='.repeat(60)}\\n\\n`;\n\nif (newReplies.length > 0) {\n  digest += `⚡ REPLIES RECEIVED (respond today):\\n`;\n  digest += `-`.repeat(40) + `\\n`;\n  for (const lead of newReplies) {\n    digest += `• ${lead['Business Name']} (${lead['First Name'] || lead['Contact Name']})\\n`;\n    digest += `  Email: ${lead['Email']}\\n`;\n    digest += `  Reply summary: ${lead['Reply Summary'] || '(not yet logged)'}\\n`;\n    digest += `  Status: ${lead['Status']}\\n\\n`;\n  }\n}\n\nif (dueToday.length > 0) {\n  digest += `📬 FOLLOW-UPS DUE TODAY (${dueToday.length}):\\n`;\n  digest += `-`.repeat(40) + `\\n`;\n  for (const lead of dueToday) {\n    const step = lead['Status'];\n    const lastContact = lead['Last Contact Date'] || lead['Initial Email Date'] || 'unknown';\n    digest += `• ${lead['Business Name']} (${lead['First Name'] || lead['Contact Name']}) — ${lead['Industry']}\\n`;\n    digest += `  Email: ${lead['Email']}\\n`;\n    digest += `  Stage: ${step}\\n`;\n    digest += `  Last contact: ${lastContact}\\n`;\n    digest += `  Personalization: ${lead['Personalization Note'] || '(none logged)'}\\n\\n`;\n  }\n} else {\n  digest += `📬 FOLLOW-UPS DUE TODAY: None\\n\\n`;\n}\n\nif (overdue.length > 0) {\n  digest += `⚠ OVERDUE FOLLOW-UPS (${overdue.length}) — action needed:\\n`;\n  digest += `-`.repeat(40) + `\\n`;\n  for (const lead of overdue) {\n    digest += `• ${lead['Business Name']} — ${lead['_daysOverdue']} day(s) overdue\\n`;\n    digest += `  Stage: ${lead['Status']} | Email: ${lead['Email']}\\n\\n`;\n  }\n}\n\n// ── Summary line ─────────────────────────────────────────────────────────\nconst totalActions = newReplies.length + dueToday.length + overdue.length;\ndigest += `${'='.repeat(60)}\\n`;\ndigest += `TOTAL ACTIONS TODAY: ${totalActions}\\n`;\ndigest += `  Replies to handle: ${newReplies.length}\\n`;\ndigest += `  Follow-ups to send: ${dueToday.length}\\n`;\ndigest += `  Overdue (catch up): ${overdue.length}\\n`;\ndigest += `\\nOpen Google Sheets to begin: [your spreadsheet URL here]\\n`;\n\nreturn [{\n  json: {\n    digest,\n    totalActions,\n    dueToday: dueToday.length,\n    overdue: overdue.length,\n    newReplies: newReplies.length,\n    hasItems: totalActions > 0\n  }\n}];"
+        "functionCode": "// ─── PRIORITY DAILY DIGEST BUILDER ────────────────────────────────────────\n//\n// Column map (matches updated crm-setup.md schema):\n//   A=Lead ID, B=Business Name, C=Industry, D=Contact Name, E=First Name\n//   F=Email, G=Phone, H=Website, I=City, J=State, K=Contact Source\n//   L=Personalization Note\n//   M=Score:Ads, N=Score:Service, O=Score:Urgency, P=Score:Website, Q=Score:Contact\n//   R=Lead Score, S=Priority Tier\n//   T=Status, U=Initial Email Date, V=FU1 Date, W=FU2 Date, X=FU3 Date\n//   Y=Last Contact Date, Z=Next Follow-Up Date\n//   AA=Reply Received, AB=Reply Date, AC=Reply Type, AD=Reply Summary\n//   AE=Meeting Date, AF=Outcome, AG=Notes\n\nconst items = $input.all();\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\n\n// Terminal statuses — never include in digest\nconst CLOSED = new Set([\n  'Booked', 'Not Interested', 'Lost',\n  'Park - 90 Days', 'Park - 60 Days', 'Do Not Contact'\n]);\n\n// Priority sort order\nconst TIER_ORDER = { '🔴 HOT': 0, '🟠 WARM': 1, '🟡 COOL': 2, '⚪ COLD': 3 };\n\n// ── Categorise every lead ───────────────────────────────────────────────\nconst urgentReplies = [];   // replied but status not yet updated\nconst dueHot = [];          // HOT leads due for follow-up today\nconst dueWarm = [];         // WARM leads due today\nconst dueCool = [];         // COOL leads due today\nconst overdue = [];         // any tier, overdue > 0 days\nconst newUncontacted = [];  // scored but never emailed (no Initial Email Date)\n\nfor (const item of items) {\n  const lead = item.json;\n\n  if (!lead['Business Name'] || !lead['Email']) continue;\n\n  const status   = (lead['Status'] || 'New Lead').trim();\n  const tier     = (lead['Priority Tier'] || '').trim();\n  const score    = parseFloat(lead['Lead Score']) || 0;\n  const replied  = lead['Reply Received'] === 'TRUE' || lead['Reply Received'] === true;\n  const nextFUStr = lead['Next Follow-Up Date'];\n  const initSent  = lead['Initial Email Date'];\n\n  if (CLOSED.has(status)) continue;\n\n  // Urgent: reply received but CRM status still in outreach stages\n  const outreachStatuses = new Set(['Contacted','Follow-Up 1 Sent','Follow-Up 2 Sent','Follow-Up 3 Sent']);\n  if (replied && outreachStatuses.has(status)) {\n    urgentReplies.push(lead);\n    continue;\n  }\n  if (replied) continue; // already in a post-reply stage, handled separately\n\n  // New uncontacted leads (scored but never emailed) - surface HOT ones\n  if (!initSent && score >= 8) {\n    newUncontacted.push(lead);\n    continue;\n  }\n\n  if (!nextFUStr) continue;\n\n  const nextFUDate = new Date(nextFUStr);\n  nextFUDate.setHours(0, 0, 0, 0);\n  const diffDays = Math.floor((today - nextFUDate) / 86400000);\n\n  if (diffDays < 0) continue; // future — not yet due\n\n  const entry = { ...lead, _daysOverdue: diffDays, _score: score, _tier: tier };\n\n  if (diffDays > 0) {\n    overdue.push(entry);\n  } else {\n    if (tier === '🔴 HOT')   dueHot.push(entry);\n    else if (tier === '🟠 WARM') dueWarm.push(entry);\n    else                         dueCool.push(entry);\n  }\n}\n\n// Sort overdue by tier then by how many days late\noverdue.sort((a, b) => {\n  const tierDiff = (TIER_ORDER[a._tier] || 3) - (TIER_ORDER[b._tier] || 3);\n  return tierDiff !== 0 ? tierDiff : b._daysOverdue - a._daysOverdue;\n});\n\n// Sort new uncontacted by score desc\nnewUncontacted.sort((a, b) => (parseFloat(b['Lead Score']) || 0) - (parseFloat(a['Lead Score']) || 0));\n\n// ── Build plain-text digest ────────────────────────────────────────────\nconst dateDisplay = today.toLocaleDateString('en-US', {\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'\n});\n\nconst SEP = '─'.repeat(55);\nlet d = `OUTREACH PRIORITY DIGEST — ${dateDisplay}\\n${'='.repeat(55)}\\n\\n`;\n\n// ── Section 0: Urgent replies ─────────────────────────────────────────\nif (urgentReplies.length > 0) {\n  d += `⚡  REPLIES RECEIVED — respond within 2 hours (${urgentReplies.length})\\n${SEP}\\n`;\n  for (const l of urgentReplies) {\n    d += `  ${l['Business Name']} (${l['First Name'] || l['Contact Name']}) — ${l['Industry']}\\n`;\n    d += `  Email: ${l['Email']}\\n`;\n    d += `  Their reply: ${l['Reply Summary'] || '(not yet logged — check Gmail)'}\\n`;\n    d += `  Reply type: ${l['Reply Type'] || '(not yet classified)'}\\n\\n`;\n  }\n}\n\n// ── Section 1: HOT leads due today ───────────────────────────────────\nif (dueHot.length > 0) {\n  d += `🔴  HOT — Follow-ups due today (${dueHot.length})\\n${SEP}\\n`;\n  for (const l of dueHot) {\n    d += `  [Score ${l._score}/10] ${l['Business Name']} (${l['First Name'] || l['Contact Name']})\\n`;\n    d += `  ${l['City']}, ${l['State']} | ${l['Industry']} | Status: ${l['Status']}\\n`;\n    d += `  Email: ${l['Email']}${l['Phone'] ? ' | Phone: ' + l['Phone'] : ''}\\n`;\n    d += `  Note: ${l['Personalization Note'] || '(none)'}\\n\\n`;\n  }\n}\n\n// ── Section 2: WARM leads due today ──────────────────────────────────\nif (dueWarm.length > 0) {\n  d += `🟠  WARM — Follow-ups due today (${dueWarm.length})\\n${SEP}\\n`;\n  for (const l of dueWarm) {\n    d += `  [Score ${l._score}/10] ${l['Business Name']} (${l['First Name'] || l['Contact Name']})\\n`;\n    d += `  ${l['City']}, ${l['State']} | ${l['Industry']} | Status: ${l['Status']}\\n`;\n    d += `  Email: ${l['Email']}\\n`;\n    d += `  Note: ${l['Personalization Note'] || '(none)'}\\n\\n`;\n  }\n}\n\n// ── Section 3: COOL leads due today ──────────────────────────────────\nif (dueCool.length > 0) {\n  d += `🟡  COOL — Follow-ups due today (${dueCool.length})\\n${SEP}\\n`;\n  for (const l of dueCool) {\n    d += `  [Score ${l._score}/10] ${l['Business Name']}\\n`;\n    d += `  ${l['City']}, ${l['State']} | ${l['Industry']} | ${l['Email']}\\n\\n`;\n  }\n}\n\n// ── Section 4: Overdue ────────────────────────────────────────────────\nif (overdue.length > 0) {\n  d += `⚠   OVERDUE — missed follow-up window (${overdue.length})\\n${SEP}\\n`;\n  for (const l of overdue) {\n    d += `  ${l._tier} [${l._score}/10] ${l['Business Name']} — ${l._daysOverdue}d overdue\\n`;\n    d += `  Status: ${l['Status']} | ${l['Email']}\\n\\n`;\n  }\n}\n\n// ── Section 5: New HOT leads never contacted ─────────────────────────\nif (newUncontacted.length > 0) {\n  d += `🆕  NEW HOT LEADS — email today (${newUncontacted.length})\\n${SEP}\\n`;\n  for (const l of newUncontacted) {\n    d += `  [Score ${l['Lead Score']}/10] ${l['Business Name']}\\n`;\n    d += `  ${l['City']}, ${l['State']} | ${l['Email']}\\n`;\n    d += `  Note: ${l['Personalization Note'] || '(write before sending)'}\\n\\n`;\n  }\n}\n\n// ── Summary line ─────────────────────────────────────────────────────\nconst totalActions = urgentReplies.length + dueHot.length + dueWarm.length +\n                     dueCool.length + overdue.length + newUncontacted.length;\n\nd += `${'='.repeat(55)}\\n`;\nd += `TOTAL: ${totalActions} action${totalActions !== 1 ? 's' : ''} today\\n`;\nd += `  ⚡ Replies to handle:     ${urgentReplies.length}\\n`;\nd += `  🔴 HOT follow-ups:        ${dueHot.length}\\n`;\nd += `  🟠 WARM follow-ups:       ${dueWarm.length}\\n`;\nd += `  🟡 COOL follow-ups:       ${dueCool.length}\\n`;\nd += `  ⚠  Overdue:               ${overdue.length}\\n`;\nd += `  🆕 New HOT to email:      ${newUncontacted.length}\\n`;\n\nconst subjectEmoji = urgentReplies.length > 0 ? '⚡' : (dueHot.length > 0 ? '🔴' : '📬');\nconst subjectLine  = urgentReplies.length > 0\n  ? `⚡ ${urgentReplies.length} repl${urgentReplies.length === 1 ? 'y' : 'ies'} + ${dueHot.length + dueWarm.length} follow-ups due`\n  : `${subjectEmoji} ${totalActions} outreach action${totalActions !== 1 ? 's' : ''} today — ${dueHot.length} HOT`;\n\nreturn [{\n  json: {\n    digest: d,\n    subjectLine,\n    totalActions,\n    urgentReplies:   urgentReplies.length,\n    hotDue:          dueHot.length,\n    warmDue:         dueWarm.length,\n    coolDue:         dueCool.length,\n    overdue:         overdue.length,\n    newHotLeads:     newUncontacted.length,\n    hasItems:        totalActions > 0\n  }\n}];"
       },
-      "id": "build-digest",
-      "name": "Build Daily Digest",
+      "id": "build-priority-digest",
+      "name": "Build Priority Digest (HOT first)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [520, 300]
+      "position": [520, 400]
     },
     {
       "parameters": {
@@ -60,68 +63,63 @@
           ]
         }
       },
-      "id": "check-if-anything-due",
+      "id": "check-has-actions",
       "name": "Anything Due Today?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [740, 300],
-      "notes": "Only sends the email if there is at least one action due. No email = no noise."
+      "position": [740, 400]
     },
     {
       "parameters": {
         "resource": "message",
         "operation": "send",
         "toList": "REPLACE_WITH_YOUR_PERSONAL_EMAIL",
-        "subject": "={{ $json['newReplies'] > 0 ? '⚡ ' + $json['newReplies'] + ' reply — ' : '' }}{{ $json['dueToday'] + $json['overdue'] }} follow-up{{ ($json['dueToday'] + $json['overdue']) !== 1 ? 's' : '' }} due today",
+        "subject": "={{ $json['subjectLine'] }}",
         "message": "={{ $json['digest'] }}"
       },
-      "id": "send-digest-email",
+      "id": "send-digest",
       "name": "Email Digest to Yourself",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2,
-      "position": [960, 180],
+      "position": [960, 280],
       "credentials": {
         "gmailOAuth2": {
           "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
           "name": "Gmail — Your Account"
         }
       },
-      "notes": "Sends to your own inbox — not to leads. This is a reminder tool only."
+      "notes": "Sends only to YOU. This workflow never contacts leads."
     },
     {
       "parameters": {},
-      "id": "nothing-due-end",
-      "name": "No Actions Today — Skip",
+      "id": "nothing-to-do",
+      "name": "Nothing Due — Silent End",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [960, 420],
-      "notes": "If nothing is due, the workflow ends silently. No email, no noise."
+      "position": [960, 520]
     }
   ],
   "connections": {
     "Schedule: 8am Mon–Fri": {
-      "main": [[{"node": "Read All Leads", "type": "main", "index": 0}]]
+      "main": [[{ "node": "Read All Leads", "type": "main", "index": 0 }]]
     },
     "Read All Leads": {
-      "main": [[{"node": "Build Daily Digest", "type": "main", "index": 0}]]
+      "main": [[{ "node": "Build Priority Digest (HOT first)", "type": "main", "index": 0 }]]
     },
-    "Build Daily Digest": {
-      "main": [[{"node": "Anything Due Today?", "type": "main", "index": 0}]]
+    "Build Priority Digest (HOT first)": {
+      "main": [[{ "node": "Anything Due Today?", "type": "main", "index": 0 }]]
     },
     "Anything Due Today?": {
       "main": [
-        [{"node": "Email Digest to Yourself", "type": "main", "index": 0}],
-        [{"node": "No Actions Today — Skip", "type": "main", "index": 0}]
+        [{ "node": "Email Digest to Yourself", "type": "main", "index": 0 }],
+        [{ "node": "Nothing Due — Silent End",  "type": "main", "index": 0 }]
       ]
     }
   },
-  "settings": {
-    "executionOrder": "v1",
-    "saveManualExecutions": true
-  },
-  "tags": ["crm", "reminders", "solo-founder", "no-bulk-send"],
-  "versionId": "1.0.0",
+  "settings": { "executionOrder": "v1", "saveManualExecutions": true },
+  "tags": ["crm", "priority-digest", "solo-founder"],
+  "versionId": "2.0.0",
   "meta": {
-    "note": "This workflow is a reminder tool only. It reads your CRM and emails YOU a digest. It does not send any outreach emails to leads. All outreach is done manually by you."
+    "note": "v2 — now sorts by Priority Tier (HOT first), surfaces new HOT leads never emailed, uses updated column schema from crm-setup.md v2."
   }
 }

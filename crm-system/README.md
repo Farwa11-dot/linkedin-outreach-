@@ -1,114 +1,168 @@
-# Solo Founder Outbound CRM
-### For cold outreach to dental and aesthetic clinics
+# Solo Founder Client Acquisition System
+### Cold outreach → qualified pipeline → closed clients
 
-A simple, free, relationship-first outreach system.
-No inbox rotation. No bulk sending. No growth hacks.
-
----
-
-## What This System Is
-
-A daily operating system for one person doing 10–30 personal outreach
-touchpoints per day. Every email is written or reviewed by you. Every
-follow-up is intentional. Every reply is handled as a real conversation.
-
-The metric this system optimizes for is not emails sent. It is
-**meaningful conversations started**.
+Built for one person doing outbound sales to dental and aesthetic clinics.
+Free tools only. Manually operated. Light automation for reminders.
 
 ---
 
-## System Architecture
+## What This System Does
+
+Takes a lead from a Google Maps listing all the way to a signed client —
+with a clear action at every stage, a score that tells you where to spend
+your time, and a dashboard that tells you what's working.
 
 ```
-MORNING (~20 min)
-│
-├── Open Google Sheets CRM
-│   └── Check "Follow-Ups Due Today" view
-│       └── Review each lead — read original email, check notes
-│
-├── Send follow-ups manually (one at a time, in Gmail)
-│   └── Personalize each one — reference their specific situation
-│
-└── Log every action in Sheets — date, what you sent, any reply
-
-AFTERNOON (~30 min)
-│
-├── Research 5–10 new leads on Google Maps
-│   └── Spend 2–3 min per lead — one real observation per business
-│
-├── Write and send 3–10 initial outreach emails
-│   └── Each one references something specific to that business
-│
-└── Add leads to CRM, set Next Follow-Up Date
-
-EVENING (optional, 5 min)
-└── Log any replies received, update statuses
+RESEARCH          OUTREACH           CONVERSION         CLOSE
+─────────         ──────────         ──────────         ──────
+Source lead  →  Score (0–10)  →  Email sequence  →  Discovery call
+                                                   →  Demo
+                                                   →  Close
+                                                   →  Onboard
 ```
 
 ---
 
-## Pipeline Stages
+## Architecture
 
 ```
-New Lead
-   │
-   ▼
-Contacted ──────────────────────────────► No Reply → Follow-Up 1 (Day 2)
-   │                                                    │
-   │                                                    ▼
-   │                                       No Reply → Follow-Up 2 (Day 5)
-   │                                                    │
-   │                                                    ▼
-   │                                       No Reply → Follow-Up 3 (Day 10)
-   │                                                    │
-   │                                                    ▼
-   │                                       No Reply → Lost / Park (Day 11)
-   │
-   └── Reply received at any stage ──────► Replied
-                                              │
-                                     ┌────────┴────────┐
-                                     ▼                  ▼
-                                Interested           Not Interested
-                                     │                  │
-                                     ▼                  ▼
-                                  Booked             Lost/Park
+DAILY DIGEST (n8n, 8am)
+│  Reads CRM → ranks by Priority Tier → emails you ranked to-do list
+│
+▼
+MORNING BLOCK (~20 min)
+│
+├── Reply inbox: classify by type, respond personally, update CRM
+│   (follow-up-intelligence.md → reply routing playbook)
+│
+└── Follow-Up Queue (Sheets): HOT first, work down by score
+    Send manually in Gmail → update CRM → log in Call Log
+
+OUTREACH BLOCK (~30 min)
+│
+├── Score new leads (5 min/lead) → lead-scoring.md
+├── Write & send initial emails manually → email-sequences.md
+└── Update CRM: status, dates, next follow-up
+
+CONVERSION (as calls are booked)
+│
+├── Pre-call prep (5 min) → conversion-system.md
+├── Discovery call → qualify, diagnose, transition to demo
+├── Demo → ROI frame on their numbers → soft close
+└── Objection handling → re-close → onboard
+```
+
+---
+
+## Pipeline Stages (full map in `sales-pipeline.md`)
+
+```
+Sourced → Scored → Ready → Contacted → Follow-Up 1/2/3 → Breakup
+                                │
+                            Reply received
+                                │
+              ┌─────────────────┼─────────────────┐
+              ▼                 ▼                  ▼
+          Positive           Not Now           Not Interested
+              │                 │                  │
+        Call Scheduled       Park               Lost
+              │
+           Qualified
+              │
+          Demo Held
+              │
+           Closing
+              │
+         Closed Won
+              │
+          Onboarding
 ```
 
 ---
 
 ## File Map
 
-| File | What It Does |
+### Foundation
+| File | Purpose |
 |---|---|
 | `README.md` | System overview (this file) |
-| `crm-setup.md` | Google Sheets structure — every column explained |
-| `outreach-workflow.md` | Step-by-step process for each pipeline stage |
-| `email-sequences.md` | 3-step email sequence (missed calls angle) |
-| `daily-workflow.md` | Daily operating routine — what to do and when |
-| `n8n/reminders-workflow.json` | n8n workflow that reminds YOU to follow up |
-| `n8n/setup-guide.md` | How to wire up the reminder workflow |
+| `crm-setup.md` | Full Sheets schema: 33 columns across 5 blocks, formulas, filter views |
+| `outreach-workflow.md` | What to do at every pipeline stage |
+| `daily-workflow.md` | Minute-by-minute daily operating routine |
+
+### Intelligence Layer
+| File | Purpose |
+|---|---|
+| `lead-scoring.md` | 5-dimension scoring model (0–10), Google Sheets integration |
+| `offer-positioning.md` | Value props + ROI framing for dental and aesthetic |
+| `priority-system.md` | HOT/WARM/COOL/COLD tiers, treatment rules, CRM visual setup |
+| `follow-up-intelligence.md` | Reply-type routing, breakup email, behaviour-based responses |
+
+### Conversion
+| File | Purpose |
+|---|---|
+| `conversion-system.md` | Discovery call script, demo structure, closing script, objections |
+| `sales-pipeline.md` | End-to-end pipeline: 14 stages, entry/exit criteria, CRM updates |
+| `email-sequences.md` | 4-step sequences for dental and aesthetic (missed calls angle) |
+
+### Measurement
+| File | Purpose |
+|---|---|
+| `performance-dashboard.md` | Google Sheets dashboard: funnel, niche, city, subject line tracker |
+
+### Automation
+| File | Purpose |
+|---|---|
+| `n8n/reminders-workflow.json` | Priority digest: HOT first, surfaces urgent replies and new HOT leads |
+| `n8n/setup-guide.md` | Credential wiring, import steps, troubleshooting |
+
+---
+
+## Google Sheets Tab Structure
+
+```
+Outreach CRM — Clinics
+│
+├── Leads          ← 33-column master pipeline (source of truth)
+├── Follow-Up Queue ← SORT(FILTER(...)) — priority-ranked daily to-do
+├── Call Log       ← one row per touchpoint
+├── Templates      ← email copy with {{placeholders}}
+└── Dashboard      ← funnel metrics, niche breakdown, subject line tracker
+```
+
+---
+
+## Column Schema Summary (`Leads` tab)
+
+| Block | Columns | Contains |
+|---|---|---|
+| Identity | A–K | Name, industry, email, phone, city, source |
+| Scoring | L–S | Personalization note, 5 score dimensions, Lead Score, Priority Tier |
+| Pipeline | T–Z | Status, email send dates, last contact, next follow-up |
+| Replies | AA–AE | Reply checkbox, date, type, summary, meeting date |
+| Outcome | AF–AG | Outcome dropdown, freeform notes |
 
 ---
 
 ## Guiding Principles
 
-**1. Fewer, better emails win.**
-Ten personally researched emails outperform a hundred generic ones.
-If you can't write one specific thing about their business, don't send yet.
+**1. Score before you email.**
+Five minutes of scoring prevents hours of wasted follow-up on leads
+who will never buy.
 
-**2. Reply = win. Everything else is pipeline.**
-The goal of every email is one thing: start a conversation.
-Not a booking, not a sale, not a demo. A conversation.
+**2. Priority determines sequence.**
+HOT leads get emailed within 24 hours and get a call attempt at Day 5.
+COOL leads wait until your HOT and WARM queue is clear.
 
-**3. Stop when they respond — then be human.**
-The moment someone replies, automation stops. You respond personally,
-quickly, and without a script.
+**3. Reply type determines response.**
+A "Not Now" reply and a "Not Interested" reply require completely different
+responses. Treating them the same is how you lose warm leads.
 
-**4. Consistency beats intensity.**
-10 leads/day for 60 days beats 100 leads in one week then nothing.
-Build the daily habit, not the one-time sprint.
+**4. Every lost deal is data.**
+Log why every lead went cold. Pattern-matching across 50 lost deals
+tells you more than any split test.
 
-**5. The CRM is your memory.**
-You will forget what you said to who and when. The CRM doesn't.
-Log everything — even "called, no answer" and "replied, not interested."
-That data becomes your map.
+**5. The dashboard tells you what to fix.**
+Reply rate below 3%: fix copy. Call-to-close below 30%: fix demo.
+Demo-to-booked below 20%: fix objection handling. Each metric
+points at a specific part of the system.
