@@ -1,0 +1,350 @@
+{
+  "name": "Cold Outreach — Multi-Inbox Scaled Sending",
+  "description": "Handles 2–5 Gmail inboxes with per-inbox limits, health checks, and Switch-based routing",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "trigger-schedule",
+      "name": "Schedule: 9am Mon–Fri",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [100, 400]
+    },
+    {
+      "parameters": {
+        "documentId": "REPLACE_WITH_SPREADSHEET_ID",
+        "sheetName": "Leads",
+        "operation": "read"
+      },
+      "id": "read-leads",
+      "name": "Read Leads (Leads Sheet)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [300, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets — CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": "REPLACE_WITH_SPREADSHEET_ID",
+        "sheetName": "Sent Log",
+        "operation": "read"
+      },
+      "id": "read-sent-log",
+      "name": "Read Sent Log (for today's count)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [300, 580],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets — CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// ─── MULTI-INBOX CAPACITY ROUTER ───────────────────────────────────────────\n//\n// 1. Reads today's send count per inbox from Sent Log\n// 2. Filters leads with status='ready'\n// 3. Assigns each ready lead to an inbox that still has capacity\n// 4. Enforces per-inbox daily cap (configurable below)\n// 5. Returns only the leads that will be sent today, with inbox assigned\n\nconst MAX_PER_INBOX = 20; // Hard ceiling per Gmail account\nconst SEND_DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday'];\nconst today = new Date();\nconst todayStr = today.toISOString().split('T')[0];\nconst dayName = today.toLocaleDateString('en-US', { weekday: 'long' });\n\n// Safety gate: do not run on weekends\nif (!SEND_DAYS.includes(dayName)) {\n  return [];\n}\n\n// ── Count today's sends per inbox from Sent Log ────────────────────────────\nconst sentLogItems = $('Read Sent Log (for today\\'s count)').all();\nconst sentTodayByInbox = {};\n\nfor (const logItem of sentLogItems) {\n  const log = logItem.json;\n  const logDate = (log['Timestamp'] || '').split('T')[0];\n  if (logDate !== todayStr) continue;\n  if (log['Status'] !== 'sent') continue;\n  const inbox = log['Inbox Used'] || 'inbox1';\n  sentTodayByInbox[inbox] = (sentTodayByInbox[inbox] || 0) + 1;\n}\n\n// ── Get capacity remaining per inbox ──────────────────────────────────────\nconst inboxes = ['inbox1', 'inbox2', 'inbox3', 'inbox4', 'inbox5'];\nconst capacity = {};\nfor (const inbox of inboxes) {\n  const sent = sentTodayByInbox[inbox] || 0;\n  capacity[inbox] = Math.max(0, MAX_PER_INBOX - sent);\n}\n\n// ── Filter ready leads ─────────────────────────────────────────────────────\nconst allLeads = $('Read Leads (Leads Sheet)').all();\nconst readyLeads = allLeads.filter(item => {\n  const lead = item.json;\n  return lead['Status'] === 'ready'\n    && lead['Email']\n    && lead['Do Not Contact'] !== 'TRUE'\n    && lead['Do Not Contact'] !== true\n    && lead['Email Verified'] !== 'no';\n});\n\n// ── Assign leads to inboxes based on capacity ──────────────────────────────\nconst outputItems = [];\nconst usedCapacity = { ...Object.fromEntries(inboxes.map(i => [i, 0])) };\n\nfor (const leadItem of readyLeads) {\n  const lead = leadItem.json;\n  // Respect manually assigned inbox if set\n  const preferredInbox = lead['Assigned Inbox'];\n  \n  let assignedInbox = null;\n\n  if (preferredInbox && inboxes.includes(preferredInbox)) {\n    const remaining = capacity[preferredInbox] - usedCapacity[preferredInbox];\n    if (remaining > 0) {\n      assignedInbox = preferredInbox;\n    }\n  } else {\n    // Auto-assign: pick inbox with most remaining capacity\n    const available = inboxes\n      .filter(i => (capacity[i] - usedCapacity[i]) > 0)\n      .sort((a, b) => (capacity[b] - usedCapacity[b]) - (capacity[a] - usedCapacity[a]));\n    if (available.length > 0) {\n      assignedInbox = available[0];\n    }\n  }\n\n  if (!assignedInbox) break; // All inboxes at capacity for today\n\n  usedCapacity[assignedInbox]++;\n  outputItems.push({\n    json: {\n      ...lead,\n      'Assigned Inbox': assignedInbox,\n      _capacityLog: `Assigned to ${assignedInbox} (${usedCapacity[assignedInbox]}/${MAX_PER_INBOX})`\n    }\n  });\n}\n\nreturn outputItems;"
+      },
+      "id": "capacity-router",
+      "name": "Capacity Router — Assign Inbox by Limit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Build personalized email for each lead\n// Template selection: clinic type × step\nconst items = $input.all();\nconst outputItems = [];\n\nfor (const item of items) {\n  const lead = item.json;\n  const clinicType = (lead['Clinic Type'] || 'dental').toLowerCase();\n  const firstName = lead['First Name'] || lead['Contact Name'] || 'there';\n  const businessName = lead['Business Name'] || 'your clinic';\n  const city = lead['City'] || 'your area';\n  const personTag = lead['Personalization Tag'] || 'a few areas worth discussing';\n\n  let subject, body;\n\n  if (clinicType === 'dental' || clinicType === 'orthodontics') {\n    subject = `Quick question for ${firstName}`;\n    body = `Hi ${firstName},\\n\\nI was looking at ${businessName} on Google Maps and noticed ${personTag} — I work with dental practices on exactly that.\\n\\nI help small dental offices attract more local patients without spending money on ads — usually through optimizing their Google Business profile and getting a steady flow of patient referrals set up systematically.\\n\\nMost practices I work with pick up 3–8 new patients/month within the first 60 days.\\n\\nWould a 15-minute call this week make sense to see if it's a fit?\\n\\n[YOUR NAME]\\n[YOUR TITLE]\\n[YOUR PHONE]\\n\\nYou're receiving this because ${businessName} appears in local dental searches for ${city}. Reply \"unsubscribe\" to never hear from me again.`;\n  } else {\n    subject = `Quick idea for ${businessName}`;\n    body = `Hi ${firstName},\\n\\nI came across ${businessName} while researching aesthetic clinics in ${city} — ${personTag}.\\n\\nI work with small med spas and aesthetic practices on client retention and new patient acquisition — without paid ads. Specifically: getting existing clients to come back more often and refer friends automatically.\\n\\nThe average practice I work with adds $3–5K/month in recurring revenue within 90 days just from retention fixes.\\n\\nWould a quick 15-minute call make sense to see if there's a fit for your practice?\\n\\n[YOUR NAME]\\n[YOUR TITLE]\\n[YOUR PHONE]\\n\\nYou're receiving this because ${businessName} appears in local aesthetic searches for ${city}. Reply \"unsubscribe\" to never hear from me again.`;\n  }\n\n  outputItems.push({\n    json: {\n      ...lead,\n      emailSubject: subject,\n      emailBody: body\n    }\n  });\n}\n\nreturn outputItems;"
+      },
+      "id": "build-email",
+      "name": "Build Personalized Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Add randomized human-like delay (180–480 seconds = 3–8 minutes)\n// First item in the batch gets no delay; subsequent ones get spaced delays\nconst items = $input.all();\nconst outputItems = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const minDelay = 180000; // 3 minutes in ms\n  const maxDelay = 480000; // 8 minutes in ms\n  const delay = i === 0 ? 0 : Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;\n  \n  outputItems.push({\n    json: {\n      ...items[i].json,\n      _sendDelay: delay,\n      _sendIndex: i + 1,\n      _sendTotal: items.length\n    }\n  });\n}\n\nreturn outputItems;"
+      },
+      "id": "add-delay-metadata",
+      "name": "Add Send Delay Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 400]
+    },
+    {
+      "parameters": {
+        "amount": "={{ $json['_sendDelay'] }}",
+        "unit": "milliseconds"
+      },
+      "id": "wait-node",
+      "name": "Wait (Human Delay)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1180, 400]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            {
+              "value2": "inbox1",
+              "operation": "equals"
+            },
+            {
+              "value2": "inbox2",
+              "operation": "equals"
+            },
+            {
+              "value2": "inbox3",
+              "operation": "equals"
+            },
+            {
+              "value2": "inbox4",
+              "operation": "equals"
+            },
+            {
+              "value2": "inbox5",
+              "operation": "equals"
+            }
+          ],
+          "fallbackOutput": "none"
+        },
+        "value": "={{ $json['Assigned Inbox'] }}"
+      },
+      "id": "inbox-switch",
+      "name": "Switch: Route by Assigned Inbox",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1400, 400]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "={{ $json['emailSubject'] }}",
+        "message": "={{ $json['emailBody'] }}",
+        "toList": "={{ $json['Email'] }}"
+      },
+      "id": "gmail-inbox1",
+      "name": "Gmail — Inbox 1",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1620, 100],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_INBOX1_CREDENTIAL_ID",
+          "name": "Gmail — Inbox 1"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "={{ $json['emailSubject'] }}",
+        "message": "={{ $json['emailBody'] }}",
+        "toList": "={{ $json['Email'] }}"
+      },
+      "id": "gmail-inbox2",
+      "name": "Gmail — Inbox 2",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1620, 250],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_INBOX2_CREDENTIAL_ID",
+          "name": "Gmail — Inbox 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "={{ $json['emailSubject'] }}",
+        "message": "={{ $json['emailBody'] }}",
+        "toList": "={{ $json['Email'] }}"
+      },
+      "id": "gmail-inbox3",
+      "name": "Gmail — Inbox 3",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1620, 400],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_INBOX3_CREDENTIAL_ID",
+          "name": "Gmail — Inbox 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "={{ $json['emailSubject'] }}",
+        "message": "={{ $json['emailBody'] }}",
+        "toList": "={{ $json['Email'] }}"
+      },
+      "id": "gmail-inbox4",
+      "name": "Gmail — Inbox 4",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1620, 550],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_INBOX4_CREDENTIAL_ID",
+          "name": "Gmail — Inbox 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "={{ $json['emailSubject'] }}",
+        "message": "={{ $json['emailBody'] }}",
+        "toList": "={{ $json['Email'] }}"
+      },
+      "id": "gmail-inbox5",
+      "name": "Gmail — Inbox 5",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1620, 700],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_INBOX5_CREDENTIAL_ID",
+          "name": "Gmail — Inbox 5"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Merge outputs from all Gmail nodes and prepare the Sent Log entry\nconst item = $input.item.json;\nconst now = new Date().toISOString();\n\nreturn [{\n  json: {\n    Timestamp: now,\n    'Lead ID': item['Lead ID'],\n    'Business Name': item['Business Name'],\n    Email: item['Email'],\n    Step: '1',\n    'Inbox Used': item['Assigned Inbox'],\n    Subject: item['emailSubject'],\n    Status: 'sent'\n  }\n}];"
+      },
+      "id": "prepare-log",
+      "name": "Prepare Sent Log Entry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1840, 400]
+    },
+    {
+      "parameters": {
+        "documentId": "REPLACE_WITH_SPREADSHEET_ID",
+        "sheetName": "Sent Log",
+        "operation": "append"
+      },
+      "id": "append-sent-log",
+      "name": "Append to Sent Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2060, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets — CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Update lead status in Leads sheet\nconst item = $input.item.json;\nconst today = new Date().toISOString().split('T')[0];\nconst next = new Date();\nnext.setDate(next.getDate() + 3);\nconst nextActionDate = next.toISOString().split('T')[0];\n\nreturn [{\n  json: {\n    'Lead ID': item['Lead ID'] || item['Lead ID'],\n    Status: 'emailed-step1',\n    'Step 1 Sent Date': today,\n    'Next Action Date': nextActionDate,\n    'Assigned Inbox': item['Assigned Inbox']\n  }\n}];"
+      },
+      "id": "prepare-status-update",
+      "name": "Prepare Status Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2280, 400]
+    },
+    {
+      "parameters": {
+        "documentId": "REPLACE_WITH_SPREADSHEET_ID",
+        "sheetName": "Leads",
+        "operation": "update",
+        "columnToMatchOn": "Lead ID"
+      },
+      "id": "update-lead-status",
+      "name": "Update Lead Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2500, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets — CRM"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule: 9am Mon–Fri": {
+      "main": [
+        [
+          {"node": "Read Leads (Leads Sheet)", "type": "main", "index": 0},
+          {"node": "Read Sent Log (for today's count)", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Read Leads (Leads Sheet)": {
+      "main": [[{"node": "Capacity Router — Assign Inbox by Limit", "type": "main", "index": 0}]]
+    },
+    "Read Sent Log (for today's count)": {
+      "main": [[{"node": "Capacity Router — Assign Inbox by Limit", "type": "main", "index": 0}]]
+    },
+    "Capacity Router — Assign Inbox by Limit": {
+      "main": [[{"node": "Build Personalized Email", "type": "main", "index": 0}]]
+    },
+    "Build Personalized Email": {
+      "main": [[{"node": "Add Send Delay Metadata", "type": "main", "index": 0}]]
+    },
+    "Add Send Delay Metadata": {
+      "main": [[{"node": "Wait (Human Delay)", "type": "main", "index": 0}]]
+    },
+    "Wait (Human Delay)": {
+      "main": [[{"node": "Switch: Route by Assigned Inbox", "type": "main", "index": 0}]]
+    },
+    "Switch: Route by Assigned Inbox": {
+      "main": [
+        [{"node": "Gmail — Inbox 1", "type": "main", "index": 0}],
+        [{"node": "Gmail — Inbox 2", "type": "main", "index": 0}],
+        [{"node": "Gmail — Inbox 3", "type": "main", "index": 0}],
+        [{"node": "Gmail — Inbox 4", "type": "main", "index": 0}],
+        [{"node": "Gmail — Inbox 5", "type": "main", "index": 0}]
+      ]
+    },
+    "Gmail — Inbox 1": {"main": [[{"node": "Prepare Sent Log Entry", "type": "main", "index": 0}]]},
+    "Gmail — Inbox 2": {"main": [[{"node": "Prepare Sent Log Entry", "type": "main", "index": 0}]]},
+    "Gmail — Inbox 3": {"main": [[{"node": "Prepare Sent Log Entry", "type": "main", "index": 0}]]},
+    "Gmail — Inbox 4": {"main": [[{"node": "Prepare Sent Log Entry", "type": "main", "index": 0}]]},
+    "Gmail — Inbox 5": {"main": [[{"node": "Prepare Sent Log Entry", "type": "main", "index": 0}]]},
+    "Prepare Sent Log Entry": {
+      "main": [[{"node": "Append to Sent Log", "type": "main", "index": 0}]]
+    },
+    "Append to Sent Log": {
+      "main": [[{"node": "Prepare Status Update", "type": "main", "index": 0}]]
+    },
+    "Prepare Status Update": {
+      "main": [[{"node": "Update Lead Status", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "tags": ["cold-outreach", "multi-inbox", "scaled", "clinics"],
+  "versionId": "2.0.0"
+}

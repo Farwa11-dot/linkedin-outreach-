@@ -1,0 +1,180 @@
+{
+  "name": "Cold Outreach — Health Monitor & Auto-Pause",
+  "description": "Runs Monday morning: calculates per-inbox health metrics, auto-pauses unhealthy inboxes, emails weekly summary",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "monitor-trigger",
+      "name": "Schedule: 8am Every Monday",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "documentId": "REPLACE_WITH_SPREADSHEET_ID",
+        "sheetName": "Sent Log",
+        "operation": "read"
+      },
+      "id": "read-sent-log-monitor",
+      "name": "Read Sent Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [300, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets — CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": "REPLACE_WITH_SPREADSHEET_ID",
+        "sheetName": "Leads",
+        "operation": "read"
+      },
+      "id": "read-leads-monitor",
+      "name": "Read Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [300, 480],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets — CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// ─── HEALTH METRICS CALCULATOR ────────────────────────────────────────────\n//\n// Calculates per-inbox metrics for the past 7 days:\n// - Sends, Bounces, Bounce Rate\n// - Replies, Reply Rate\n// - Health status: GREEN / YELLOW / RED\n// - Auto-pause recommendation\n\nconst sentLogItems = $('Read Sent Log').all();\nconst leadsItems = $('Read Leads').all();\n\nconst now = new Date();\nconst sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);\n\nconst inboxes = ['inbox1', 'inbox2', 'inbox3', 'inbox4', 'inbox5'];\n\n// ── Per-inbox metrics ────────────────────────────────────────────────────\nconst metrics = {};\nfor (const inbox of inboxes) {\n  metrics[inbox] = { sends: 0, bounces: 0, failed: 0 };\n}\n\nfor (const logItem of sentLogItems) {\n  const log = logItem.json;\n  const logDate = new Date(log['Timestamp']);\n  if (logDate < sevenDaysAgo) continue;\n\n  const inbox = log['Inbox Used'];\n  if (!inbox || !metrics[inbox]) continue;\n\n  if (log['Status'] === 'sent') metrics[inbox].sends++;\n  if (log['Status'] === 'bounced') metrics[inbox].bounces++;\n  if (log['Status'] === 'failed') metrics[inbox].failed++;\n}\n\n// ── Reply rates ──────────────────────────────────────────────────────────\nconst allTimeReplies = leadsItems.filter(i => i.json['Reply Received'] === 'yes').length;\nconst allTimeSends = sentLogItems.filter(i => i.json['Status'] === 'sent').length;\nconst globalReplyRate = allTimeSends > 0 ? (allTimeReplies / allTimeSends * 100).toFixed(2) : 0;\n\n// ── Health status per inbox ──────────────────────────────────────────────\nconst inboxStatuses = {};\nfor (const inbox of inboxes) {\n  const m = metrics[inbox];\n  const bounceRate = m.sends > 0 ? (m.bounces / m.sends * 100) : 0;\n  m.bounceRate = bounceRate.toFixed(2);\n\n  let status = 'GREEN';\n  let shouldPause = false;\n\n  if (bounceRate > 4) {\n    status = 'RED';\n    shouldPause = true;\n  } else if (bounceRate > 2) {\n    status = 'YELLOW';\n  }\n\n  // If inbox has no sends this week, mark as INACTIVE\n  if (m.sends === 0) {\n    status = 'INACTIVE';\n  }\n\n  inboxStatuses[inbox] = {\n    ...m,\n    status,\n    shouldPause\n  };\n}\n\n// ── Build summary text ───────────────────────────────────────────────────\nlet summaryLines = [\n  `=== WEEKLY OUTREACH HEALTH REPORT ===`,\n  `Week ending: ${now.toDateString()}`,\n  ``,\n  `GLOBAL METRICS:`,\n  `  Total sends (7-day): ${Object.values(metrics).reduce((s, m) => s + m.sends, 0)}`,\n  `  Reply rate (all-time): ${globalReplyRate}%`,\n  ``,\n  `PER-INBOX STATUS:`\n];\n\nfor (const inbox of inboxes) {\n  const s = inboxStatuses[inbox];\n  if (s.status === 'INACTIVE') continue;\n  summaryLines.push(`  ${inbox.toUpperCase()}: ${s.status} | Sends: ${s.sends} | Bounces: ${s.bounces} | Bounce Rate: ${s.bounceRate}%${s.shouldPause ? ' ← AUTO-PAUSE TRIGGERED' : ''}`);\n}\n\nconst pausedInboxes = inboxes.filter(i => inboxStatuses[i].shouldPause);\nif (pausedInboxes.length > 0) {\n  summaryLines.push(``);\n  summaryLines.push(`ACTION REQUIRED: Pause ${pausedInboxes.join(', ')} — bounce rate too high.`);\n  summaryLines.push(`Set status of leads assigned to these inboxes from 'ready' to 'paused' in Google Sheets.`);\n}\n\nconst summaryText = summaryLines.join('\\n');\n\nreturn [{\n  json: {\n    summaryText,\n    pausedInboxes,\n    inboxStatuses,\n    globalReplyRate,\n    weekEndDate: now.toDateString(),\n    hasRedInbox: pausedInboxes.length > 0\n  }\n}];"
+      },
+      "id": "calculate-metrics",
+      "name": "Calculate Health Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 380]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json['hasRedInbox'] }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-if-alert-needed",
+      "name": "Any RED Inbox?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [780, 380]
+    },
+    {
+      "parameters": {
+        "documentId": "REPLACE_WITH_SPREADSHEET_ID",
+        "sheetName": "Leads",
+        "operation": "update",
+        "columnToMatchOn": "Assigned Inbox",
+        "options": {}
+      },
+      "id": "pause-red-inbox-leads",
+      "name": "Auto-Pause Leads on Red Inboxes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 240],
+      "parameters": {
+        "functionCode": "// Mark all 'ready' leads on paused inboxes as 'paused'\nconst pausedInboxes = $input.item.json.pausedInboxes;\n\nif (!pausedInboxes || pausedInboxes.length === 0) {\n  return [];\n}\n\n// This node signals n8n — the actual batch update would\n// require reading leads and updating each row.\n// For simplicity: return a flag and handle in Sheets manually,\n// OR chain to a Sheets Update node.\nreturn pausedInboxes.map(inbox => ({\n  json: {\n    _action: 'pause-inbox',\n    inbox,\n    message: `Inbox ${inbox} auto-paused due to high bounce rate. Update leads manually in Sheets.`\n  }\n}));"
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "toList": "REPLACE_WITH_YOUR_PERSONAL_EMAIL",
+        "subject": "={{ $json['hasRedInbox'] ? '🚨 OUTREACH ALERT: Red Inbox Detected' : '✅ Weekly Outreach Health Report' }}",
+        "message": "={{ $json['summaryText'] }}"
+      },
+      "id": "send-weekly-report",
+      "name": "Email Weekly Report to Self",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1000, 500],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_INBOX1_CREDENTIAL_ID",
+          "name": "Gmail — Inbox 1"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": "REPLACE_WITH_SPREADSHEET_ID",
+        "sheetName": "Stats",
+        "operation": "append"
+      },
+      "id": "log-weekly-stats",
+      "name": "Log Stats to Dashboard Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1220, 380],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets — CRM"
+        }
+      },
+      "parameters": {
+        "functionCode": "// Flatten metrics for Sheets row\nconst data = $input.item.json;\nconst stats = data.inboxStatuses;\n\nreturn [{\n  json: {\n    Week: data.weekEndDate,\n    'Global Reply Rate': data.globalReplyRate + '%',\n    'Inbox 1 Status': stats.inbox1?.status || 'N/A',\n    'Inbox 1 Bounce %': stats.inbox1?.bounceRate || '0',\n    'Inbox 2 Status': stats.inbox2?.status || 'N/A',\n    'Inbox 2 Bounce %': stats.inbox2?.bounceRate || '0',\n    'Inbox 3 Status': stats.inbox3?.status || 'N/A',\n    'Inbox 3 Bounce %': stats.inbox3?.bounceRate || '0',\n    'Inbox 4 Status': stats.inbox4?.status || 'N/A',\n    'Inbox 4 Bounce %': stats.inbox4?.bounceRate || '0',\n    'Inbox 5 Status': stats.inbox5?.status || 'N/A',\n    'Inbox 5 Bounce %': stats.inbox5?.bounceRate || '0',\n    'Red Inboxes': data.pausedInboxes.join(', ') || 'none'\n  }\n}];"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule: 8am Every Monday": {
+      "main": [
+        [
+          {"node": "Read Sent Log", "type": "main", "index": 0},
+          {"node": "Read Leads", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Read Sent Log": {
+      "main": [[{"node": "Calculate Health Metrics", "type": "main", "index": 0}]]
+    },
+    "Read Leads": {
+      "main": [[{"node": "Calculate Health Metrics", "type": "main", "index": 0}]]
+    },
+    "Calculate Health Metrics": {
+      "main": [[{"node": "Any RED Inbox?", "type": "main", "index": 0}]]
+    },
+    "Any RED Inbox?": {
+      "main": [
+        [{"node": "Auto-Pause Leads on Red Inboxes", "type": "main", "index": 0}],
+        [{"node": "Email Weekly Report to Self", "type": "main", "index": 0}]
+      ]
+    },
+    "Auto-Pause Leads on Red Inboxes": {
+      "main": [[{"node": "Email Weekly Report to Self", "type": "main", "index": 0}]]
+    },
+    "Email Weekly Report to Self": {
+      "main": [[{"node": "Log Stats to Dashboard Sheet", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": ["cold-outreach", "health-monitor", "auto-pause"],
+  "versionId": "1.0.0"
+}

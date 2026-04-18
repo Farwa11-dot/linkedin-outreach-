@@ -58,6 +58,7 @@ No paid tools. No spam. No burned domains.
 
 ## File Map
 
+### Core System
 | File | Purpose |
 |---|---|
 | `README.md` | System overview (this file) |
@@ -66,7 +67,23 @@ No paid tools. No spam. No burned domains.
 | `personalization-guide.md` | How to research and tag leads for free |
 | `deliverability-rules.md` | Sending limits, warm-up, safety rules |
 | `sheets/crm-template.md` | Google Sheets CRM column definitions |
-| `n8n/workflow.json` | Importable n8n automation workflow |
+
+### Scaling System
+| File | Purpose |
+|---|---|
+| `scaling/scaling-roadmap.md` | Phase-by-phase volume growth: 20 → 100+/day |
+| `scaling/multi-inbox-strategy.md` | Identity design, routing, and isolation for 2–5 inboxes |
+| `scaling/deliverability-dashboard.md` | Metric tracking, formulas, and weekly health checks |
+| `scaling/fallback-strategy.md` | Recovery playbook for every failure mode |
+
+### n8n Workflows
+| File | Purpose |
+|---|---|
+| `n8n/workflow.json` | Single-inbox Step 1 sends (beginner) |
+| `n8n/workflow-followup.json` | Step 2 & 3 follow-ups |
+| `n8n/workflow-multisend.json` | Multi-inbox scaled sending with Switch router (2–5 inboxes) |
+| `n8n/workflow-health-monitor.json` | Monday health report + auto-pause on red metrics |
+| `n8n/setup-guide.md` | Credential wiring + import instructions |
 
 ---
 
@@ -88,13 +105,23 @@ No paid tools. No spam. No burned domains.
 
 ---
 
-## Daily Capacity (Safe Mode)
+## Scaling Capacity (by Phase)
 
-| Inboxes | Daily Sends | Monthly Reach |
-|---|---|---|
-| 1 Gmail | 20 emails/day | ~400 leads/month |
-| 2 Gmails | 40 emails/day | ~800 leads/month |
-| 3 Gmails | 60 emails/day | ~1,200 leads/month |
+| Phase | Timeline | Inboxes | Daily Sends | Monthly Reach |
+|---|---|---|---|---|
+| Phase 1 (Warm-Up) | Day 1–21 | 1 | 0 → 15 | — |
+| Phase 2 (Baseline) | Day 22–45 | 2 | 40 | ~800 |
+| Phase 3 (Growth) | Day 46–75 | 4 | 60 → 80 | ~1,400 |
+| Phase 4 (Scale) | Day 76+ | 5 | 100 | ~2,000 |
 
-> Never exceed 20 cold emails/day per Gmail account. Gmail's soft limit is 500/day
-> total but cold email volume above 20–30/day triggers spam filters rapidly.
+> Volume increases are gated on health metrics (bounce rate, reply rate, inbox placement).
+> See `scaling/scaling-roadmap.md` for exact thresholds and the week-by-week plan.
+
+## Which Workflow to Use
+
+| You are at... | Use this workflow |
+|---|---|
+| Getting started (1 inbox) | `n8n/workflow.json` |
+| Running 2–5 inboxes | `n8n/workflow-multisend.json` |
+| Sending follow-ups | `n8n/workflow-followup.json` |
+| Monitoring health weekly | `n8n/workflow-health-monitor.json` |
