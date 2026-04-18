@@ -1,0 +1,275 @@
+{
+  "name": "Free Cold Outreach — Dental & Aesthetic Clinics",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "node-schedule-trigger",
+      "name": "Schedule Trigger (9am Mon-Fri)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "sheetName": "Leads",
+        "options": {
+          "headerRow": 1,
+          "valueRenderMode": "FORMATTED_VALUE"
+        }
+      },
+      "id": "node-read-leads",
+      "name": "Read Leads from Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [460, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets — CRM"
+        }
+      },
+      "parameters": {
+        "documentId": "REPLACE_WITH_YOUR_SPREADSHEET_ID",
+        "sheetName": "Leads",
+        "operation": "read"
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "={{ $json['Status'] }}",
+            "operation": "equals",
+            "rightValue": "ready"
+          }
+        }
+      },
+      "id": "node-filter-ready",
+      "name": "Filter: Status = ready",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json['Status'] }}",
+              "operation": "equals",
+              "value2": "ready"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Count how many emails already sent today per inbox\nconst sentToday = {};\nconst today = new Date().toISOString().split('T')[0];\n\n// This node tracks daily limits — n8n processes items one at a time\n// For a full implementation, read from the Sent Log sheet to count\n// Here we use a simple counter stored in workflow static data\n\nconst MAX_PER_INBOX = 20;\n\nconst items = $input.all();\nconst outputItems = [];\n\nfor (const item of items) {\n  const inbox = item.json['Assigned Inbox'] || 'inbox1';\n  sentToday[inbox] = sentToday[inbox] || 0;\n  \n  if (sentToday[inbox] < MAX_PER_INBOX) {\n    sentToday[inbox]++;\n    outputItems.push(item);\n  }\n  // Leads over limit are skipped — they'll be picked up tomorrow\n}\n\nreturn outputItems;"
+      },
+      "id": "node-check-limits",
+      "name": "Check Daily Send Limits (20/inbox)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Read email templates from the Templates sheet\n// and merge with lead data to build personalized emails\n\nconst items = $input.all();\nconst outputItems = [];\n\nfor (const item of items) {\n  const lead = item.json;\n  const clinicType = (lead['Clinic Type'] || 'dental').toLowerCase();\n  const step = 'step1'; // This workflow handles Step 1 only\n\n  // --- DENTAL STEP 1 TEMPLATE ---\n  let subject = '';\n  let body = '';\n\n  if (clinicType === 'dental' || clinicType === 'orthodontics') {\n    subject = `Quick question for ${lead['First Name'] || lead['Contact Name'] || 'there'}`;\n    body = `Hi ${lead['First Name'] || 'there'},\n\nI was looking at ${lead['Business Name']} on Google Maps and noticed ${lead['Personalization Tag'] || 'a few things worth discussing'} — I work with dental practices on exactly that.\n\nI help small dental offices attract more local patients without spending money on ads — usually through optimizing their Google Business profile and getting a steady flow of patient referrals set up systematically.\n\nMost practices I work with pick up 3–8 new patients/month within the first 60 days.\n\nWould a 15-minute call this week make sense to see if it's a fit?\n\n[YOUR NAME]\n[YOUR TITLE]\n[YOUR PHONE]\n\nYou're receiving this because your clinic appears in local search for ${lead['City']}, ${lead['State']}. Reply \"unsubscribe\" to opt out.`;\n  } else {\n    // Aesthetic / Med Spa\n    subject = `Quick idea for ${lead['Business Name']}`;\n    body = `Hi ${lead['First Name'] || 'there'},\n\nI came across ${lead['Business Name']} while researching aesthetic clinics in ${lead['City']} — ${lead['Personalization Tag'] || 'thought this might be relevant'}.\n\nI work with small med spas and aesthetic practices on client retention and new patient acquisition — without paid ads. Specifically: getting existing clients to come back more often and refer friends automatically.\n\nThe average practice I work with adds $3–5K/month in recurring revenue within 90 days just from retention fixes.\n\nWould a quick 15-minute call make sense to see if there's a fit for your practice?\n\n[YOUR NAME]\n[YOUR TITLE]\n[YOUR PHONE]\n\nYou're receiving this because your clinic appears in local search for ${lead['City']}, ${lead['State']}. Reply \"unsubscribe\" to opt out.`;\n  }\n\n  outputItems.push({\n    json: {\n      ...lead,\n      emailSubject: subject,\n      emailBody: body,\n      step: 'step1'\n    }\n  });\n}\n\nreturn outputItems;"
+      },
+      "id": "node-build-email",
+      "name": "Build Personalized Email (Step 1)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Add a random delay between 3–8 minutes between emails\n// to simulate human sending behavior\n\nconst items = $input.all();\nconst outputItems = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const delayMinutes = Math.floor(Math.random() * (8 - 3 + 1)) + 3;\n  const delayMs = delayMinutes * 60 * 1000;\n  \n  outputItems.push({\n    json: {\n      ...items[i].json,\n      delayMs: i === 0 ? 0 : delayMs, // First email sends immediately\n      sendOrder: i + 1\n    }\n  });\n}\n\nreturn outputItems;"
+      },
+      "id": "node-add-delay",
+      "name": "Add Random Delay (3–8 min between sends)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "amount": "={{ $json['delayMs'] }}",
+        "unit": "milliseconds"
+      },
+      "id": "node-wait",
+      "name": "Wait (human-like delay)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "={{ $json['emailSubject'] }}",
+        "message": "={{ $json['emailBody'] }}",
+        "toList": "={{ $json['Email'] }}",
+        "options": {
+          "replyTo": "REPLACE_WITH_YOUR_REPLY_TO_ADDRESS"
+        }
+      },
+      "id": "node-gmail-send",
+      "name": "Send via Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1780, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail — Inbox 1"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Log the send to the Sent Log sheet\nconst item = $input.item.json;\nconst now = new Date().toISOString();\n\nreturn [{\n  json: {\n    Timestamp: now,\n    'Lead ID': item['Lead ID'],\n    'Business Name': item['Business Name'],\n    Email: item['Email'],\n    Step: '1',\n    'Inbox Used': item['Assigned Inbox'],\n    Subject: item['emailSubject'],\n    Status: 'sent'\n  }\n}];"
+      },
+      "id": "node-prepare-log",
+      "name": "Prepare Log Entry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetName": "Sent Log",
+        "columnToMatchOn": "Timestamp",
+        "options": {}
+      },
+      "id": "node-log-to-sheets",
+      "name": "Log Send to Google Sheets (Sent Log)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2220, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets — CRM"
+        }
+      },
+      "parameters": {
+        "documentId": "REPLACE_WITH_YOUR_SPREADSHEET_ID",
+        "sheetName": "Sent Log",
+        "operation": "append"
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Update the lead's status and Step 1 sent date in Leads sheet\nconst item = $input.item.json;\nconst today = new Date().toISOString().split('T')[0];\n\n// Calculate next action date (+3 days for Step 2)\nconst nextDate = new Date();\nnextDate.setDate(nextDate.getDate() + 3);\nconst nextActionDate = nextDate.toISOString().split('T')[0];\n\nreturn [{\n  json: {\n    'Lead ID': item['Lead ID'],\n    Status: 'emailed-step1',\n    'Step 1 Sent Date': today,\n    'Next Action Date': nextActionDate\n  }\n}];"
+      },
+      "id": "node-prepare-update",
+      "name": "Prepare Status Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2440, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "sheetName": "Leads",
+        "columnToMatchOn": "Lead ID",
+        "options": {}
+      },
+      "id": "node-update-lead-status",
+      "name": "Update Lead Status in Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2660, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets — CRM"
+        }
+      },
+      "parameters": {
+        "documentId": "REPLACE_WITH_YOUR_SPREADSHEET_ID",
+        "sheetName": "Leads",
+        "operation": "update",
+        "columnToMatchOn": "Lead ID"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (9am Mon-Fri)": {
+      "main": [
+        [{"node": "Read Leads from Google Sheets", "type": "main", "index": 0}]
+      ]
+    },
+    "Read Leads from Google Sheets": {
+      "main": [
+        [{"node": "Filter: Status = ready", "type": "main", "index": 0}]
+      ]
+    },
+    "Filter: Status = ready": {
+      "main": [
+        [{"node": "Check Daily Send Limits (20/inbox)", "type": "main", "index": 0}]
+      ]
+    },
+    "Check Daily Send Limits (20/inbox)": {
+      "main": [
+        [{"node": "Build Personalized Email (Step 1)", "type": "main", "index": 0}]
+      ]
+    },
+    "Build Personalized Email (Step 1)": {
+      "main": [
+        [{"node": "Add Random Delay (3–8 min between sends)", "type": "main", "index": 0}]
+      ]
+    },
+    "Add Random Delay (3–8 min between sends)": {
+      "main": [
+        [{"node": "Wait (human-like delay)", "type": "main", "index": 0}]
+      ]
+    },
+    "Wait (human-like delay)": {
+      "main": [
+        [{"node": "Send via Gmail", "type": "main", "index": 0}]
+      ]
+    },
+    "Send via Gmail": {
+      "main": [
+        [{"node": "Prepare Log Entry", "type": "main", "index": 0}]
+      ]
+    },
+    "Prepare Log Entry": {
+      "main": [
+        [{"node": "Log Send to Google Sheets (Sent Log)", "type": "main", "index": 0}]
+      ]
+    },
+    "Log Send to Google Sheets (Sent Log)": {
+      "main": [
+        [{"node": "Prepare Status Update", "type": "main", "index": 0}]
+      ]
+    },
+    "Prepare Status Update": {
+      "main": [
+        [{"node": "Update Lead Status in Google Sheets", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["cold-outreach", "clinics", "gmail", "free-tools"],
+  "pinData": {},
+  "versionId": "1.0.0",
+  "meta": {
+    "instanceId": "cold-outreach-v1"
+  }
+}

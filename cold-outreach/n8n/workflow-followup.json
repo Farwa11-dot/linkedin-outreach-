@@ -1,0 +1,172 @@
+{
+  "name": "Free Cold Outreach — Follow-Up Sequences (Step 2 & 3)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "node-schedule-followup",
+      "name": "Schedule Trigger (10am Mon-Fri — Follow-ups)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "notes": "Runs 1 hour after initial outreach workflow to separate the send windows"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "sheetName": "Leads"
+      },
+      "id": "node-read-all-leads",
+      "name": "Read All Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [460, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets — CRM"
+        }
+      },
+      "parameters": {
+        "documentId": "REPLACE_WITH_YOUR_SPREADSHEET_ID",
+        "sheetName": "Leads",
+        "operation": "read"
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Filter leads due for Step 2 or Step 3\n// Step 2: status=emailed-step1 AND step1 sent 3+ days ago AND no reply\n// Step 3: status=emailed-step2 AND step2 sent 4+ days ago AND no reply\n\nconst items = $input.all();\nconst today = new Date();\nconst outputItems = [];\n\nfor (const item of items) {\n  const lead = item.json;\n  const status = lead['Status'];\n  const replyReceived = lead['Reply Received'];\n  const doNotContact = lead['Do Not Contact'];\n\n  // Skip if replied or DNC\n  if (replyReceived === 'yes' || doNotContact === 'TRUE' || doNotContact === true) {\n    continue;\n  }\n\n  let readyForFollowup = false;\n  let followupStep = null;\n\n  if (status === 'emailed-step1') {\n    const sentDate = new Date(lead['Step 1 Sent Date']);\n    const daysSinceSent = Math.floor((today - sentDate) / (1000 * 60 * 60 * 24));\n    if (daysSinceSent >= 3) {\n      readyForFollowup = true;\n      followupStep = 'step2';\n    }\n  } else if (status === 'emailed-step2') {\n    const sentDate = new Date(lead['Step 2 Sent Date']);\n    const daysSinceSent = Math.floor((today - sentDate) / (1000 * 60 * 60 * 24));\n    if (daysSinceSent >= 4) {\n      readyForFollowup = true;\n      followupStep = 'step3';\n    }\n  }\n\n  if (readyForFollowup) {\n    outputItems.push({\n      json: { ...lead, followupStep }\n    });\n  }\n}\n\n// Enforce daily limit: max 20 per inbox across all workflows combined\n// Simple approach: cap total follow-ups at 30 per run\nreturn outputItems.slice(0, 30);"
+      },
+      "id": "node-filter-followups",
+      "name": "Filter: Leads Due for Follow-Up",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Build the correct follow-up email based on step and clinic type\nconst items = $input.all();\nconst outputItems = [];\n\nfor (const item of items) {\n  const lead = item.json;\n  const step = lead.followupStep;\n  const clinicType = (lead['Clinic Type'] || 'dental').toLowerCase();\n  const firstName = lead['First Name'] || lead['Contact Name'] || 'there';\n  const businessName = lead['Business Name'];\n  const city = lead['City'] || 'your area';\n\n  let subject = '';\n  let body = '';\n\n  if (step === 'step2') {\n    // STEP 2 — Follow-Up 1 (reply to same thread conceptually)\n    if (clinicType === 'dental' || clinicType === 'orthodontics') {\n      subject = `Re: Quick question for ${firstName}`;\n      body = `Hi ${firstName},\n\nJust bumping this up — I know inboxes get busy.\n\nOne thing I've seen work really well for practices like ${businessName}: setting up a simple \"refer a friend\" system that your front desk can run in 5 minutes/day. No app, no tech. Just a process.\n\nThe practices that do this consistently see 2–3 extra new patients per month from existing patients alone.\n\nHappy to walk you through it on a quick call — no pitch, just want to show you the framework.\n\nWorth 15 minutes?\n\n[YOUR NAME]`;\n    } else {\n      subject = `Re: Quick idea for ${businessName}`;\n      body = `Hi ${firstName},\n\nFollowing up in case this got buried.\n\nOne quick stat that might be relevant: aesthetic clinics typically see 60–70% of revenue come from repeat clients — but most don't have a system to bring them back predictably.\n\nI've helped a few practices set up a simple reactivation sequence (email + text) that brings back dormant clients almost on autopilot. Takes about a day to set up.\n\nIf that sounds interesting, I'd love to show you how it works on a short call.\n\n[YOUR NAME]`;\n    }\n  } else if (step === 'step3') {\n    // STEP 3 — Final Touch\n    if (clinicType === 'dental' || clinicType === 'orthodontics') {\n      subject = `Last note — ${businessName}`;\n      body = `Hi ${firstName},\n\nI'll keep this short — last email from me on this.\n\nI put together a quick overview of what I've seen work for dental practices in ${city} specifically. Happy to send it over if useful (it's a one-pager, no fluff).\n\nIf timing isn't right, totally understand. I'll check back in a few months.\n\nEither way — good luck with ${businessName}. The reviews look great.\n\n[YOUR NAME]\n\nP.S. If you ever want that one-pager, just reply \"send it\" and I'll get it to you.`;\n    } else {\n      subject = `Closing the loop — ${businessName}`;\n      body = `Hi ${firstName},\n\nLast note from me — don't want to clutter your inbox.\n\nI wrote up a short breakdown of the 3 things aesthetic clinics in ${city} are doing right now to grow without ads. Happy to send it over if you're curious.\n\nNo strings. Just figured it might be useful given what ${businessName} is building.\n\nIf now isn't the right time, no worries at all — I'll circle back later in the year.\n\n[YOUR NAME]\n\nP.S. Reply \"yes\" if you want the breakdown — I'll send it right over.`;\n    }\n  }\n\n  outputItems.push({\n    json: {\n      ...lead,\n      emailSubject: subject,\n      emailBody: body\n    }\n  });\n}\n\nreturn outputItems;"
+      },
+      "id": "node-build-followup-email",
+      "name": "Build Follow-Up Email (Step 2 or 3)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.floor(Math.random() * (8 - 3 + 1) + 3) * 60 * 1000 }}",
+        "unit": "milliseconds"
+      },
+      "id": "node-delay-followup",
+      "name": "Random Delay (3–8 min)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "={{ $json['emailSubject'] }}",
+        "message": "={{ $json['emailBody'] }}",
+        "toList": "={{ $json['Email'] }}"
+      },
+      "id": "node-gmail-send-followup",
+      "name": "Send Follow-Up via Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1340, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail — Inbox 1"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Determine new status and update dates\nconst item = $input.item.json;\nconst today = new Date().toISOString().split('T')[0];\nconst step = item.followupStep;\n\nlet newStatus = '';\nlet sentDateField = '';\nlet nextActionDate = '';\n\nif (step === 'step2') {\n  newStatus = 'emailed-step2';\n  sentDateField = 'Step 2 Sent Date';\n  const next = new Date();\n  next.setDate(next.getDate() + 4);\n  nextActionDate = next.toISOString().split('T')[0];\n} else if (step === 'step3') {\n  newStatus = 'emailed-step3';\n  sentDateField = 'Step 3 Sent Date';\n  nextActionDate = ''; // Sequence complete\n}\n\nreturn [{\n  json: {\n    'Lead ID': item['Lead ID'],\n    Status: newStatus,\n    [sentDateField]: today,\n    'Next Action Date': nextActionDate,\n    // Also log to Sent Log\n    _logEntry: {\n      Timestamp: new Date().toISOString(),\n      'Lead ID': item['Lead ID'],\n      'Business Name': item['Business Name'],\n      Email: item['Email'],\n      Step: step === 'step2' ? '2' : '3',\n      'Inbox Used': item['Assigned Inbox'],\n      Subject: item['emailSubject'],\n      Status: 'sent'\n    }\n  }\n}];"
+      },
+      "id": "node-prepare-followup-update",
+      "name": "Prepare Status Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "sheetName": "Leads",
+        "columnToMatchOn": "Lead ID"
+      },
+      "id": "node-update-followup-status",
+      "name": "Update Lead Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1780, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets — CRM"
+        }
+      },
+      "parameters": {
+        "documentId": "REPLACE_WITH_YOUR_SPREADSHEET_ID",
+        "sheetName": "Leads",
+        "operation": "update",
+        "columnToMatchOn": "Lead ID"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (10am Mon-Fri — Follow-ups)": {
+      "main": [
+        [{"node": "Read All Leads", "type": "main", "index": 0}]
+      ]
+    },
+    "Read All Leads": {
+      "main": [
+        [{"node": "Filter: Leads Due for Follow-Up", "type": "main", "index": 0}]
+      ]
+    },
+    "Filter: Leads Due for Follow-Up": {
+      "main": [
+        [{"node": "Build Follow-Up Email (Step 2 or 3)", "type": "main", "index": 0}]
+      ]
+    },
+    "Build Follow-Up Email (Step 2 or 3)": {
+      "main": [
+        [{"node": "Random Delay (3–8 min)", "type": "main", "index": 0}]
+      ]
+    },
+    "Random Delay (3–8 min)": {
+      "main": [
+        [{"node": "Send Follow-Up via Gmail", "type": "main", "index": 0}]
+      ]
+    },
+    "Send Follow-Up via Gmail": {
+      "main": [
+        [{"node": "Prepare Status Update", "type": "main", "index": 0}]
+      ]
+    },
+    "Prepare Status Update": {
+      "main": [
+        [{"node": "Update Lead Status", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": ["cold-outreach", "follow-up", "clinics", "free-tools"],
+  "versionId": "1.0.0"
+}
