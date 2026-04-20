@@ -86,34 +86,46 @@ Sourced → Scored → Ready → Contacted → Follow-Up 1/2/3 → Breakup
 | File | Purpose |
 |---|---|
 | `README.md` | System overview (this file) |
-| `crm-setup.md` | Full Sheets schema: 33 columns across 5 blocks, formulas, filter views |
+| `crm-setup.md` | Full Sheets schema: 33 columns, scoring formulas, priority queue filter |
 | `outreach-workflow.md` | What to do at every pipeline stage |
 | `daily-workflow.md` | Minute-by-minute daily operating routine |
 
 ### Intelligence Layer
 | File | Purpose |
 |---|---|
-| `lead-scoring.md` | 5-dimension scoring model (0–10), Google Sheets integration |
+| `lead-scoring.md` | 5-dimension 0–10 model, scoring examples, Sheets integration |
 | `offer-positioning.md` | Value props + ROI framing for dental and aesthetic |
-| `priority-system.md` | HOT/WARM/COOL/COLD tiers, treatment rules, CRM visual setup |
-| `follow-up-intelligence.md` | Reply-type routing, breakup email, behaviour-based responses |
+| `priority-system.md` | HOT/WARM/COOL/COLD tiers, urgency flag formulas, visual CRM setup |
+| `follow-up-intelligence.md` | Reply-type routing (6 types), breakup email templates |
+| `icp-optimization.md` | Monthly ICP review, score model changelog, niche cut/double rules |
 
-### Conversion
+### Outreach & Conversation
 | File | Purpose |
 |---|---|
-| `conversion-system.md` | Discovery call script, demo structure, closing script, objections |
-| `sales-pipeline.md` | End-to-end pipeline: 14 stages, entry/exit criteria, CRM updates |
-| `email-sequences.md` | 4-step sequences for dental and aesthetic (missed calls angle) |
+| `email-sequences.md` | 4-step email sequences — dental + aesthetic (missed calls angle) |
+| `multi-channel-follow-up.md` | Day-by-day email + phone + DM sequences per lead tier |
+| `conversation-handling.md` | Exact reply flows: vague interest, info requests, pricing questions |
+| `call-booking-system.md` | Booking scripts (email, DM, phone), Calendly timing, no-show recovery |
 
-### Measurement
+### Conversion & Close
 | File | Purpose |
 |---|---|
-| `performance-dashboard.md` | Google Sheets dashboard: funnel, niche, city, subject line tracker |
+| `conversion-system.md` | Discovery call script, demo structure, closing script, 7 objection responses |
+| `offer-pricing.md` | 3-tier offer (Entry/Main/Upgrade), pricing presentation flow, risk reversals |
+| `sales-pipeline.md` | 14-stage pipeline, entry/exit criteria, CRM updates per stage |
+
+### Measurement & Optimization
+| File | Purpose |
+|---|---|
+| `performance-dashboard.md` | 6-section Sheets dashboard: funnel, niche, city, subject line tracker |
+| `icp-optimization.md` | Monthly review loop, segment scoring, niche decision framework |
+| `speed-response-system.md` | Response time rules by event type, Gmail setup, post-call window |
 
 ### Automation
 | File | Purpose |
 |---|---|
-| `n8n/reminders-workflow.json` | Priority digest: HOT first, surfaces urgent replies and new HOT leads |
+| `n8n/reminders-workflow.json` | 8am priority digest: HOT first, surfaces replies + new HOT leads |
+| `n8n/reply-alert-workflow.json` | Every-30min alert: fires when a reply sits 2h+ unanswered |
 | `n8n/setup-guide.md` | Credential wiring, import steps, troubleshooting |
 
 ---

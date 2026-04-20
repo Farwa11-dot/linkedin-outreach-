@@ -1,0 +1,126 @@
+{
+  "name": "Outreach CRM — Reply Staleness Alert",
+  "description": "Runs every 30 min during business hours (8am–7pm weekdays). Finds replies received today that haven't been responded to in 2+ hours and sends an urgent alert. Never sends outreach emails.",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/30 8-19 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "trigger-every-30min",
+      "name": "Schedule: Every 30min (8am–7pm Weekdays)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [100, 300],
+      "notes": "Runs every 30 minutes during business hours only. Catches stale replies fast."
+    },
+    {
+      "parameters": {
+        "documentId": "REPLACE_WITH_YOUR_SPREADSHEET_ID",
+        "sheetName": "Leads",
+        "operation": "read",
+        "options": {
+          "headerRow": 1,
+          "valueRenderMode": "FORMATTED_VALUE"
+        }
+      },
+      "id": "read-leads",
+      "name": "Read Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [300, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets — CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// ─── REPLY STALENESS DETECTOR ──────────────────────────────────────────────\n//\n// Finds leads where:\n//   1. Reply Received = TRUE (col AA)\n//   2. Reply Date = today (col AB) — reply came in today\n//   3. Status is still in an outreach stage (col T) — CRM not yet updated past outreach\n//   4. 2+ hours have elapsed since the reply came in\n//\n// Column map (crm-setup.md v2):\n//   T  = Status\n//   Y  = Last Contact Date\n//   Z  = Next Follow-Up Date\n//   AA = Reply Received (checkbox)\n//   AB = Reply Date\n//   AC = Reply Type\n//   AD = Reply Summary\n//   R  = Lead Score\n//   S  = Priority Tier\n//   B  = Business Name\n//   E  = First Name\n//   F  = Email\n//   I  = City\n//   C  = Industry\n\nconst items = $input.all();\nconst now = new Date();\nconst todayStr = now.toISOString().split('T')[0];\nconst TWO_HOURS_MS = 2 * 60 * 60 * 1000;\n\n// Outreach stages where a reply means action is needed urgently\nconst OUTREACH_STAGES = new Set([\n  'Contacted',\n  'Follow-Up 1 Sent',\n  'Follow-Up 2 Sent',\n  'Follow-Up 3 Sent',\n  'Replied' // Replied but no sub-status update yet\n]);\n\nconst staleReplies = [];\n\nfor (const item of items) {\n  const lead = item.json;\n\n  if (!lead['Business Name'] || !lead['Email']) continue;\n\n  const replyReceived = lead['Reply Received'] === 'TRUE' || lead['Reply Received'] === true;\n  if (!replyReceived) continue;\n\n  const replyDateStr = lead['Reply Date'];\n  if (!replyDateStr) continue;\n\n  // Only check replies received today\n  const replyDate = new Date(replyDateStr);\n  const replyDateOnly = replyDate.toISOString().split('T')[0];\n  if (replyDateOnly !== todayStr) continue;\n\n  // Only flag if status is still in an outreach stage\n  const status = (lead['Status'] || '').trim();\n  if (!OUTREACH_STAGES.has(status)) continue;\n\n  // Check if 2+ hours have elapsed since the reply came in\n  // Reply Date from Sheets is often just a date string without time;\n  // if no time component, treat as start of day (conservative) — will alert\n  const elapsedMs = now - replyDate;\n  if (elapsedMs < TWO_HOURS_MS) continue;\n\n  const hoursElapsed = Math.floor(elapsedMs / 3600000);\n  const minutesElapsed = Math.floor((elapsedMs % 3600000) / 60000);\n  const elapsedStr = hoursElapsed > 0\n    ? `${hoursElapsed}h ${minutesElapsed}m`\n    : `${minutesElapsed}m`;\n\n  staleReplies.push({\n    businessName:    lead['Business Name'],\n    firstName:       lead['First Name'] || lead['Contact Name'] || '',\n    email:           lead['Email'],\n    city:            lead['City'] || '',\n    industry:        lead['Industry'] || '',\n    status:          status,\n    replyType:       lead['Reply Type'] || '(not classified)',\n    replySummary:    lead['Reply Summary'] || '(not yet logged)',\n    leadScore:       lead['Lead Score'] || '',\n    priorityTier:    lead['Priority Tier'] || '',\n    elapsedStr\n  });\n}\n\nif (staleReplies.length === 0) {\n  return [{ json: { hasStaleReplies: false, count: 0, alertBody: '', subjectLine: '' } }];\n}\n\n// Sort: HOT first\nconst TIER_ORDER = { '🔴 HOT': 0, '🟠 WARM': 1, '🟡 COOL': 2, '⚪ COLD': 3 };\nstaleReplies.sort((a, b) =>\n  (TIER_ORDER[a.priorityTier] || 3) - (TIER_ORDER[b.priorityTier] || 3)\n);\n\n// Build alert body\nconst SEP = '─'.repeat(50);\nlet body = `⚡ REPLY ALERT — ${staleReplies.length} unanswered repl${staleReplies.length === 1 ? 'y' : 'ies'}\\n`;\nbody += `${'='.repeat(50)}\\n\\n`;\nbody += `These leads replied today and have been waiting 2+ hours.\\n`;\nbody += `Respond NOW to maintain conversion momentum.\\n\\n`;\n\nfor (const r of staleReplies) {\n  body += `${r.priorityTier} [Score ${r.leadScore}/10] ${r.businessName}\\n`;\n  body += `  Waiting: ${r.elapsedStr} since reply\\n`;\n  body += `  Email: ${r.email}\\n`;\n  body += `  Reply type: ${r.replyType}\\n`;\n  body += `  They said: ${r.replySummary}\\n`;\n  body += `  CRM status: ${r.status}\\n\\n`;\n}\n\nbody += SEP + '\\n';\nbody += `Open Gmail and respond before these leads go cold.\\n`;\n\nconst subjectLine = staleReplies.length === 1\n  ? `⚡ ${staleReplies[0].businessName} replied ${staleReplies[0].elapsedStr} ago — respond now`\n  : `⚡ ${staleReplies.length} leads replied hours ago — respond now`;\n\nreturn [{\n  json: {\n    hasStaleReplies: true,\n    count: staleReplies.length,\n    alertBody: body,\n    subjectLine\n  }\n}];"
+      },
+      "id": "detect-stale-replies",
+      "name": "Detect Stale Replies (2h+ unanswered)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json['hasStaleReplies'] }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-has-stale",
+      "name": "Any Stale Replies?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [740, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "toList": "REPLACE_WITH_YOUR_PERSONAL_EMAIL",
+        "subject": "={{ $json['subjectLine'] }}",
+        "message": "={{ $json['alertBody'] }}"
+      },
+      "id": "send-alert",
+      "name": "Send Urgency Alert to Yourself",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [960, 180],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail — Your Account"
+        }
+      },
+      "notes": "Sends ONLY to you. Never contacts leads."
+    },
+    {
+      "parameters": {},
+      "id": "no-stale-end",
+      "name": "No Stale Replies — Silent End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [960, 420],
+      "notes": "Runs silently every 30 min when nothing needs attention. No email sent."
+    }
+  ],
+  "connections": {
+    "Schedule: Every 30min (8am–7pm Weekdays)": {
+      "main": [[{ "node": "Read Leads", "type": "main", "index": 0 }]]
+    },
+    "Read Leads": {
+      "main": [[{ "node": "Detect Stale Replies (2h+ unanswered)", "type": "main", "index": 0 }]]
+    },
+    "Detect Stale Replies (2h+ unanswered)": {
+      "main": [[{ "node": "Any Stale Replies?", "type": "main", "index": 0 }]]
+    },
+    "Any Stale Replies?": {
+      "main": [
+        [{ "node": "Send Urgency Alert to Yourself", "type": "main", "index": 0 }],
+        [{ "node": "No Stale Replies — Silent End",  "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1", "saveManualExecutions": false },
+  "tags": ["crm", "reply-alert", "speed", "solo-founder"],
+  "versionId": "1.0.0",
+  "meta": {
+    "note": "Runs every 30 minutes. Silent when no alerts needed. Fires urgency email the moment a reply goes 2h without response during business hours."
+  }
+}
