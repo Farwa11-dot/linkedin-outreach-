@@ -128,6 +128,15 @@ Sourced → Scored → Ready → Contacted → Follow-Up 1/2/3 → Breakup
 | `n8n/reply-alert-workflow.json` | Every-30min alert: fires when a reply sits 2h+ unanswered |
 | `n8n/setup-guide.md` | Credential wiring, import steps, troubleshooting |
 
+### Practical Setup
+| File | Purpose |
+|---|---|
+| `calendly-setup.md` | 10-step free Calendly setup: event type, intake question, when to share the link |
+| `demo-flow.md` | Minute-by-minute 15-min call script: opening, discovery, demo, ROI, close |
+| `lead-sourcing-system.md` | 30-min daily sourcing: city rotation, 8 Maps search terms, email finding, quick scoring |
+| `landing-page.md` | 6-section warm-lead page: full copy, Carrd 25-min build guide, when to send the link |
+| `onboarding-process.md` | Post-close process: onboarding form, test call, go-live, Week 1 + 30-day check-ins |
+
 ---
 
 ## Google Sheets Tab Structure
